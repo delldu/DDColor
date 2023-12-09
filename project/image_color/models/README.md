@@ -1,0 +1,1 @@
+eaa797cf975248e99b6729f832197605  image_color.pth
