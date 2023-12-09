@@ -70,27 +70,21 @@ def image_predict(grey_input_files, output_dir):
         g_rgb = color_space.lab2rgb(g_lab)
 
         # g_rgb resize to (512, 512)
-        g_rgb = F.interpolate(
-            g_rgb,
+        g_rgb = F.interpolate(g_rgb,
             size=(512, 512),
             mode="bilinear",
             recompute_scale_factor=False,
             align_corners=False,
         )
 
-        out_ab = todos.model.forward(model, device, g_rgb).clamp(-50.0, 50.0)
-        out_ab /= 50.0
+        out_ab = todos.model.forward(model, device, g_rgb)/128.0
 
-        out_ab = F.interpolate(
-            out_ab,
+        out_ab = F.interpolate(out_ab,
             size=(H, W),
             mode="bilinear",
             recompute_scale_factor=False,
             align_corners=False,
         )
-
-        todos.debug.output_var("g_l", g_l)
-        todos.debug.output_var("out_ab", out_ab)
 
         out_lab = torch.cat((g_l, out_ab), dim=1)
         predict_tensor = color_space.lab2rgb(out_lab)
