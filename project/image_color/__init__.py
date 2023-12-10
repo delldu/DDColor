@@ -25,19 +25,21 @@ import pdb
 def get_color_model():
     """Create model."""
 
-    model_path = "models/image_color.pth"
-    cdir = os.path.dirname(__file__)
-    checkpoint = model_path if cdir == "" else cdir + "/" + model_path
-
     model = ddcolor_arch.DDColor()
-
-    todos.model.load(model, checkpoint)
     device = todos.model.get_device()
     model = model.to(device)
     model.eval()
+    if 'cpu' in str(device.type):
+        model.float()
 
     print(f"Running on {device} ...")
+    # # make sure model good for C/C++
     # model = torch.jit.script(model)
+    # # https://github.com/pytorch/pytorch/issues/52286
+    # torch._C._jit_set_profiling_executor(False)
+    # # C++ Reference
+    # # torch::jit::getProfilingMode() = false;
+    # # torch::jit::setTensorExprFuserEnabled(false);
 
     # todos.data.mkdir("output")
     # if not os.path.exists("output/image_color.torch"):

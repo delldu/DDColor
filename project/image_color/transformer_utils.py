@@ -1,14 +1,15 @@
-from typing import Optional
+import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
 
-class SelfAttentionLayer(nn.Module):
+from typing import Optional
 
-    def __init__(self, d_model, nhead, dropout=0.0,
-                 activation="relu", normalize_before=False):
+import pdb
+
+class SelfAttentionLayer(nn.Module):
+    def __init__(self, d_model, nhead, dropout=0.0, activation="relu", normalize_before=False):
         super().__init__()
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
-
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
@@ -23,15 +24,17 @@ class SelfAttentionLayer(nn.Module):
                 nn.init.xavier_uniform_(p)
 
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
-        return tensor if pos is None else tensor + pos
+        # if pos is None:
+        #     pdb.set_trace()
+        # return tensor if pos is None else tensor + pos
+        return tensor + pos
 
     def forward_post(self, tgt,
-                     tgt_mask: Optional[Tensor] = None,
-                     tgt_key_padding_mask: Optional[Tensor] = None,
+                     tgt_mask: Optional[Tensor] = None, # ===None
+                     tgt_key_padding_mask: Optional[Tensor] = None, # === None
                      query_pos: Optional[Tensor] = None):
         q = k = self.with_pos_embed(tgt, query_pos)
-        tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
-                              key_padding_mask=tgt_key_padding_mask)[0]
+        tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask, key_padding_mask=tgt_key_padding_mask)[0]
         tgt = tgt + self.dropout(tgt2)
         tgt = self.norm(tgt)
 
@@ -43,8 +46,7 @@ class SelfAttentionLayer(nn.Module):
                     query_pos: Optional[Tensor] = None):
         tgt2 = self.norm(tgt)
         q = k = self.with_pos_embed(tgt2, query_pos)
-        tgt2 = self.self_attn(q, k, value=tgt2, attn_mask=tgt_mask,
-                              key_padding_mask=tgt_key_padding_mask)[0]
+        tgt2 = self.self_attn(q, k, value=tgt2, attn_mask=tgt_mask, key_padding_mask=tgt_key_padding_mask)[0]
         tgt = tgt + self.dropout(tgt2)
         
         return tgt
@@ -53,17 +55,14 @@ class SelfAttentionLayer(nn.Module):
                 tgt_mask: Optional[Tensor] = None,
                 tgt_key_padding_mask: Optional[Tensor] = None,
                 query_pos: Optional[Tensor] = None):
-        if self.normalize_before:
-            return self.forward_pre(tgt, tgt_mask,
-                                    tgt_key_padding_mask, query_pos)
-        return self.forward_post(tgt, tgt_mask,
-                                 tgt_key_padding_mask, query_pos)
+        # if self.normalize_before: # False
+        #     pdb.set_trace()
+        #     return self.forward_pre(tgt, tgt_mask, tgt_key_padding_mask, query_pos)
+        return self.forward_post(tgt, tgt_mask, tgt_key_padding_mask, query_pos)
 
 
 class CrossAttentionLayer(nn.Module):
-
-    def __init__(self, d_model, nhead, dropout=0.0,
-                 activation="relu", normalize_before=False):
+    def __init__(self, d_model, nhead, dropout=0.0, activation="relu", normalize_before=False):
         super().__init__()
         self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
 
@@ -74,6 +73,8 @@ class CrossAttentionLayer(nn.Module):
         self.normalize_before = normalize_before
 
         self._reset_parameters()
+        # pdb.set_trace()
+
     
     def _reset_parameters(self):
         for p in self.parameters():
@@ -81,11 +82,14 @@ class CrossAttentionLayer(nn.Module):
                 nn.init.xavier_uniform_(p)
 
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
-        return tensor if pos is None else tensor + pos
+        # if pos is None:
+        #     pdb.set_trace()
+        # return tensor if pos is None else tensor + pos
+        return tensor + pos
 
     def forward_post(self, tgt, memory,
-                     memory_mask: Optional[Tensor] = None,
-                     memory_key_padding_mask: Optional[Tensor] = None,
+                     memory_mask: Optional[Tensor] = None, # === None
+                     memory_key_padding_mask: Optional[Tensor] = None, # === None
                      pos: Optional[Tensor] = None,
                      query_pos: Optional[Tensor] = None):
         tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
@@ -112,21 +116,18 @@ class CrossAttentionLayer(nn.Module):
         return tgt
 
     def forward(self, tgt, memory,
-                memory_mask: Optional[Tensor] = None,
-                memory_key_padding_mask: Optional[Tensor] = None,
+                memory_mask: Optional[Tensor] = None, # === None
+                memory_key_padding_mask: Optional[Tensor] = None, # === None
                 pos: Optional[Tensor] = None,
                 query_pos: Optional[Tensor] = None):
-        if self.normalize_before:
-            return self.forward_pre(tgt, memory, memory_mask,
-                                    memory_key_padding_mask, pos, query_pos)
-        return self.forward_post(tgt, memory, memory_mask,
-                                 memory_key_padding_mask, pos, query_pos)
+        # if self.normalize_before: # False
+        #     pdb.set_trace()
+        #     return self.forward_pre(tgt, memory, memory_mask, memory_key_padding_mask, pos, query_pos)
+        return self.forward_post(tgt, memory, memory_mask, memory_key_padding_mask, pos, query_pos)
 
 
 class FFNLayer(nn.Module):
-
-    def __init__(self, d_model, dim_feedforward=2048, dropout=0.0,
-                 activation="relu", normalize_before=False):
+    def __init__(self, d_model, dim_feedforward=2048, dropout=0.0, activation="relu", normalize_before=False):
         super().__init__()
         # Implementation of Feedforward model
         self.linear1 = nn.Linear(d_model, dim_feedforward)
@@ -139,6 +140,8 @@ class FFNLayer(nn.Module):
         self.normalize_before = normalize_before
 
         self._reset_parameters()
+        # pdb.set_trace()
+        # torch.jit.script(self)
     
     def _reset_parameters(self):
         for p in self.parameters():
@@ -146,7 +149,10 @@ class FFNLayer(nn.Module):
                 nn.init.xavier_uniform_(p)
 
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
-        return tensor if pos is None else tensor + pos
+        # if pos is None:
+        #     pdb.set_trace()
+        # return tensor if pos is None else tensor + pos
+        return tensor + pos
 
     def forward_post(self, tgt):
         tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
@@ -161,8 +167,9 @@ class FFNLayer(nn.Module):
         return tgt
 
     def forward(self, tgt):
-        if self.normalize_before:
-            return self.forward_pre(tgt)
+        # if self.normalize_before:
+        #     pdb.set_trace()
+        #     return self.forward_pre(tgt)
         return self.forward_post(tgt)
 
 

@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 
@@ -5,6 +6,9 @@ from .unet import Hook, CustomPixelShuffle_ICNR,  UnetBlockWide, NormType, custo
 from .convnext import ConvNeXt
 from .transformer_utils import SelfAttentionLayer, CrossAttentionLayer, FFNLayer, MLP
 from .position_encoding import PositionEmbeddingSine
+from typing import List
+
+import todos
 import pdb
 
 class DDColor(nn.Module):
@@ -15,7 +19,6 @@ class DDColor(nn.Module):
                  nf=512,
                  num_output_channels=2,
                  last_norm='Spectral',
-                 do_normalize=False,
                  num_queries=100,
                  num_scales=3,
                  dec_layers=9,
@@ -37,30 +40,34 @@ class DDColor(nn.Module):
         self.refine_net = nn.Sequential(custom_conv_layer(num_queries + 3, num_output_channels, ks=1, 
             use_activ=False, norm_type=NormType.Spectral))
     
-        self.do_normalize = do_normalize # False
         self.register_buffer('mean', torch.Tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer('std', torch.Tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
+        self.load_weights()
+
+    def load_weights(self, model_path="models/image_color.pth"):
+        cdir = os.path.dirname(__file__)
+        checkpoint = model_path if cdir == "" else cdir + "/" + model_path
+        self.load_state_dict(torch.load(checkpoint))
 
     def normalize(self, img):
         return (img - self.mean) / self.std
 
-    def denormalize(self, img):
-        return img * self.std + self.mean
+    # def denormalize(self, img):
+    #     return img * self.std + self.mean
 
     def forward(self, x):
-        # tensor [x] size: [1, 3, 512, 512], min: 0.00978, max: 0.859457, mean: 0.389973
+        # if x.is_cuda:
+        #     x = x.half()
         if x.shape[1] == 3: # True
             x = self.normalize(x)
         
-        self.encoder(x)
+        encoder_layers = self.encoder(x)
         out_feat = self.decoder()
         coarse_input = torch.cat([out_feat, x], dim=1)
         out = self.refine_net(coarse_input)
 
-        if self.do_normalize: # False
-            out = self.denormalize(out)
-        return out
+        return out.float()
 
 
 class Decoder(nn.Module):
@@ -87,7 +94,8 @@ class Decoder(nn.Module):
         self.layers = self.make_layers()
         embed_dim = nf // 2
 
-        self.last_shuf = CustomPixelShuffle_ICNR(embed_dim, embed_dim, blur=self.blur, norm_type=self.last_norm, scale=4)
+        self.last_shuf = CustomPixelShuffle_ICNR(embed_dim, embed_dim, blur=self.blur, 
+            norm_type=self.last_norm, scale=4)
         
         self.color_decoder = MultiScaleColorDecoder(
             in_channels=[512, 512, 256],
@@ -95,7 +103,6 @@ class Decoder(nn.Module):
             num_scales=num_scales,
             dec_layers=dec_layers,
         )
-
 
     def forward(self):
         # self.hooks[-1] -- <basicsr.archs.ddcolor_arch_utils.unet.Hook object>
@@ -117,13 +124,23 @@ class Decoder(nn.Module):
 
         out_c = self.nf
         setup_hooks = self.hooks[-2::-1]
+        # (Pdb) for k in self.hooks: print(k)
+        # <image_color.unet.Hook object at 0x7f204c5141f0> # setup_hook3
+        # <image_color.unet.Hook object at 0x7f1faac16e20> # setup_hook2
+        # <image_color.unet.Hook object at 0x7f1faac16c10> # setup_hook1
+        # <image_color.unet.Hook object at 0x7f1faac16f70>
+        # ----------------------------
+        # (Pdb) for k in setup_hooks: print(k)
+        # <image_color.unet.Hook object at 0x7f1faac16c10>
+        # <image_color.unet.Hook object at 0x7f1faac16e20>
+        # <image_color.unet.Hook object at 0x7f204c5141f0>
+
         for layer_index, hook in enumerate(setup_hooks):
             feature_c = hook.feature.shape[1]
             if layer_index == len(setup_hooks) - 1:
                 out_c = out_c // 2
-            decoder_layers.append(
-                UnetBlockWide(
-                    in_c, feature_c, out_c, hook, blur=self.blur, self_attention=False, norm_type=NormType.Spectral))
+            decoder_layers.append(UnetBlockWide(in_c, feature_c, out_c, hook, blur=self.blur, self_attention=False,
+                    norm_type=NormType.Spectral))
             in_c = out_c
         return nn.Sequential(*decoder_layers)
 
@@ -144,16 +161,22 @@ class Encoder(nn.Module):
         else:
             raise NotImplementedError
 
-        self.encoder_name = encoder_name
-        self.hook_names = hook_names
+        # self.encoder_name = encoder_name
+        self.hook_names = hook_names # ['norm0', 'norm1', 'norm2', 'norm3']
         self.hooks = self.setup_hooks()
 
 
     def setup_hooks(self):
+        # self.hook_names -- ['norm0', 'norm1', 'norm2', 'norm3']
+        # self.arch._modules['norm0'] -- LayerNormChannelsFirst
+        # self.arch._modules['norm1'] -- LayerNormChannelsFirst
+        # self.arch._modules['norm2'] -- LayerNormChannelsFirst
+        # self.arch._modules['norm3'] -- LayerNormChannelsFirst
+        
         hooks = [Hook(self.arch._modules[name]) for name in self.hook_names]
         return hooks
 
-    def forward(self, x):
+    def forward(self, x) -> List[torch.Tensor]:
         return self.arch(x)
     
 

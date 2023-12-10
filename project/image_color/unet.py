@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import collections
+import todos
 import pdb
 
 NormType = Enum('NormType', 'Batch BatchZero Weight Spectral')
@@ -25,8 +26,6 @@ class Hook:
 
 
 class SelfAttention(nn.Module):
-    "Self attention layer for nd."
-
     def __init__(self, n_channels: int):
         super().__init__()
         self.query = conv1d(n_channels, n_channels // 8)
@@ -95,7 +94,6 @@ def custom_conv_layer(
     self_attention: bool = False,
     extra_bn: bool = False,
 ):
-    "Create a sequence of convolutional (`ni` to `nf`), ReLU (if `use_activ`) and batchnorm (if `bn`) layers."
     if padding is None:
         padding = (ks - 1) // 2 if not transpose else 0
     bn = norm_type in (NormType.Batch, NormType.BatchZero) or extra_bn == True
@@ -121,40 +119,7 @@ def custom_conv_layer(
     return nn.Sequential(*layers)
 
 
-def conv_layer(ni: int,
-               nf: int,
-               ks: int = 3,
-               stride: int = 1,
-               padding: int = None,
-               bias: bool = None,
-               is_1d: bool = False,
-               norm_type=NormType.Batch,
-               use_activ: bool = True,
-               transpose: bool = False,
-               init=nn.init.kaiming_normal_,
-               self_attention: bool = False):
-    "Create a sequence of convolutional (`ni` to `nf`), ReLU (if `use_activ`) and batchnorm (if `bn`) layers."
-    if padding is None: padding = (ks - 1) // 2 if not transpose else 0
-    bn = norm_type in (NormType.Batch, NormType.BatchZero)
-    if bias is None: bias = not bn
-    conv_func = nn.ConvTranspose2d if transpose else nn.Conv1d if is_1d else nn.Conv2d
-    conv = init_default(conv_func(ni, nf, kernel_size=ks, bias=bias, stride=stride, padding=padding), init)
-    if norm_type == NormType.Weight: conv = nn.utils.weight_norm(conv)
-    elif norm_type == NormType.Spectral: conv = nn.utils.spectral_norm(conv)
-    layers = [conv]
-    if use_activ: layers.append(nn.ReLU(True))
-    if bn: layers.append((nn.BatchNorm1d if is_1d else nn.BatchNorm2d)(nf))
-    if self_attention: layers.append(SelfAttention(nf))
-    return nn.Sequential(*layers)
-
-
-def _conv(ni: int, nf: int, ks: int = 3, stride: int = 1, **kwargs):
-    return conv_layer(ni, nf, ks=ks, stride=stride, norm_type=NormType.Spectral, **kwargs)
-
-
 class CustomPixelShuffle_ICNR(nn.Module):
-    "Upsample by `scale` from `ni` filters to `nf` (default `ni`), using `nn.PixelShuffle`, `icnr` init, and `weight_norm`."
-
     def __init__(self,
                  ni: int,
                  nf: int = None,
@@ -172,7 +137,7 @@ class CustomPixelShuffle_ICNR(nn.Module):
 
         self.conv = custom_conv_layer(
             ni, nf * (scale**2), ks=1, use_activ=False, norm_type=norm_type, extra_bn=extra_bn)
-        # (Pdb) self.conv
+        # self.conv ----
         # Sequential(
         #   (0): Conv2d(1536, 2048, kernel_size=(1, 1), stride=(1, 1), bias=False)
         #   (1): BatchNorm2d(2048, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
@@ -180,6 +145,7 @@ class CustomPixelShuffle_ICNR(nn.Module):
         icnr(self.conv[0].weight)
         self.shuf = nn.PixelShuffle(scale)
         self.do_blur = blur
+        
         # Blurring over (h*w) kernel
         # "Super-Resolution using Convolutional Neural Networks without Any Checkerboard Artifacts"
         # - https://arxiv.org/abs/1806.02658
@@ -188,8 +154,12 @@ class CustomPixelShuffle_ICNR(nn.Module):
         self.relu = nn.ReLU(True)
 
     def forward(self, x):
+        # if not self.do_blur:
+        #     pdb.set_trace()
+        # x = self.shuf(self.relu(self.conv(x)))
+        # return self.blur(self.pad(x)) if self.do_blur else x
         x = self.shuf(self.relu(self.conv(x)))
-        return self.blur(self.pad(x)) if self.do_blur else x
+        return self.blur(self.pad(x))
 
 
 class UnetBlockWide(nn.Module):
@@ -200,7 +170,7 @@ class UnetBlockWide(nn.Module):
                  x_in_c: int,
                  n_out: int,
                  hook,
-                 blur: bool = False,
+                 blur: bool = True,
                  self_attention: bool = False,
                  norm_type=NormType.Spectral):
         super().__init__()
