@@ -34,7 +34,7 @@ class SelfAttention(nn.Module):
         self.gamma = nn.Parameter(torch.tensor([0.]))
 
     def forward(self, x):
-        #Notation from https://arxiv.org/pdf/1805.08318.pdf
+        # Notation from https://arxiv.org/pdf/1805.08318.pdf
         size = x.size()
         x = x.view(*size[:2], -1)
         f, g, h = self.query(x), self.key(x), self.value(x)
@@ -45,6 +45,7 @@ class SelfAttention(nn.Module):
 
 def batchnorm_2d(nf: int, norm_type: NormType = NormType.Batch):
     "A batchnorm2d layer with `nf` features initialized depending on `norm_type`."
+    print("norm_type == NormType.BatchZero: ", norm_type == NormType.BatchZero)
     bn = nn.BatchNorm2d(nf)
     with torch.no_grad():
         bn.bias.fill_(1e-3)
@@ -57,8 +58,10 @@ def init_default(m: nn.Module, func=nn.init.kaiming_normal_) -> None:
     if func:
         if hasattr(m, 'weight'): func(m.weight)
         if hasattr(m, 'bias') and hasattr(m.bias, 'data'): m.bias.data.fill_(0.)
-    return m
+    else:
+        pdb.set_trace()
 
+    return m
 
 def icnr(x, scale=2, init=nn.init.kaiming_normal_):
     "ICNR init of `x`, with `scale` and `init` function."
@@ -79,13 +82,11 @@ def conv1d(ni: int, no: int, ks: int = 1, stride: int = 1, padding: int = 0, bia
     return nn.utils.spectral_norm(conv)
 
 
-def custom_conv_layer(
-    ni: int,
-    nf: int,
-    ks: int = 3,
-    stride: int = 1,
-    use_activ: bool = True, # True | False
-    extra_bn: bool = False, # True || False
+def custom_conv_layer(ni, nf,
+    ks = 3,
+    stride = 1,
+    use_activ = True, # True | False
+    extra_bn = False, # True || False
 ):
     padding = (ks - 1) // 2
     conv_func = nn.Conv2d

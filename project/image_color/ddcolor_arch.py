@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .unet import Hook, CustomPixelShuffle_ICNR,  UnetBlockWide, custom_conv_layer
+from .unet import Hook, CustomPixelShuffle_ICNR, UnetBlockWide, custom_conv_layer
 from .convnext import ConvNeXt
 from .transformer_utils import SelfAttentionLayer, CrossAttentionLayer, FFNLayer, MLP
 from .position_encoding import PositionEmbeddingSine
@@ -76,8 +76,6 @@ class DDColor(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, hooks,
                  nf=512,
-                 # blur=True,
-                 # last_norm='Spectral',
                  num_queries=100,
                  num_scales=3,
                  dec_layers=9,
@@ -109,7 +107,6 @@ class Decoder(nn.Module):
         encode_feat = self.hooks[-1].feature # size() -- [1, 1536, 16, 16] ???
         # encode_feat.size() -- [1, 1536, 16, 16]
         # encoder_layers[3].size() -- [1, 1536, 16, 16]
-
 
         out0 = self.layers[0](encode_feat)
         out1 = self.layers[1](out0) 
@@ -204,13 +201,13 @@ class MultiScaleColorDecoder(nn.Module):
         self.pe_layer = PositionEmbeddingSine(hidden_dim // 2)
 
         # define Transformer decoder here
-        self.num_heads = nheads
-        self.num_layers = dec_layers
+        # self.num_heads = nheads
+        self.dec_layers = dec_layers
         self.transformer_self_attention_layers = nn.ModuleList()
         self.transformer_cross_attention_layers = nn.ModuleList()
         self.transformer_ffn_layers = nn.ModuleList()
 
-        for _ in range(self.num_layers):
+        for _ in range(self.dec_layers): # 9
             self.transformer_self_attention_layers.append(
                 SelfAttentionLayer(
                     d_model=hidden_dim,
@@ -238,7 +235,7 @@ class MultiScaleColorDecoder(nn.Module):
         
         self.decoder_norm = nn.LayerNorm(hidden_dim)
 
-        self.num_queries = num_queries
+        # self.num_queries = num_queries
         # learnable color query features
         self.query_feat = nn.Embedding(num_queries, hidden_dim)
         # learnable color query p.e.
@@ -283,7 +280,7 @@ class MultiScaleColorDecoder(nn.Module):
         query_embed = self.query_embed.weight.unsqueeze(1).repeat(1, bs, 1)
         output = self.query_feat.weight.unsqueeze(1).repeat(1, bs, 1)
 
-        for i in range(self.num_layers):
+        for i in range(self.dec_layers):
             level_index = i % self.num_feature_levels
             # attention: cross-attention first
             output = self.transformer_cross_attention_layers[i](
