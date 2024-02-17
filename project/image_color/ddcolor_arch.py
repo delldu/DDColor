@@ -30,9 +30,9 @@ class DDColor(nn.Module):
         self.MAX_TIMES = 1
 
         self.encoder = Encoder(encoder_name, ['norm0', 'norm1', 'norm2', 'norm3'])
-        # self.encoder.eval()
-        # test_input = torch.randn(1, num_input_channels, *input_size)
-        # self.encoder(test_input)
+        self.encoder.eval()
+        test_input = torch.randn(1, num_input_channels, *input_size)
+        self.encoder(test_input)
 
         self.decoder = Decoder(
             self.encoder.hooks,
@@ -162,7 +162,7 @@ class Encoder(nn.Module):
             self.arch = ConvNeXt(depths=[3, 3, 27, 3], dims=[96, 192, 384, 768])
         elif encoder_name == 'convnext-b':
             self.arch = ConvNeXt(depths=[3, 3, 27, 3], dims=[128, 256, 512, 1024])
-        elif encoder_name == 'convnext-l':
+        elif encoder_name == 'convnext-l': # True
             self.arch = ConvNeXt(depths=[3, 3, 27, 3], dims=[192, 384, 768, 1536])
         else:
             raise NotImplementedError
