@@ -75,14 +75,13 @@ def export_onnx_model():
     import onnxruntime
     # from onnxsim import simplify
     import onnxoptimizer
-    
+
     print("Export onnx model ...")
 
     # 1. Run torch model
     model, device = image_color.get_color_model()
-    # model = torch.jit.script(model)
 
-    B, C, H, W = 1, 3, 512, 512 # model.MAX_H, model.MAX_W
+    B, C, H, W = 1, 3, 512, 512
     dummy_input = torch.randn(B, C, H, W).to(device).clamp(0.0, 1.0)
 
     with torch.no_grad():
@@ -92,17 +91,12 @@ def export_onnx_model():
     # 2. Export onnx model
     input_names = [ "input"]
     output_names = [ "output" ]
-    # dynamic_axes = { 
-    #     'input' : {2: 'height', 3: 'width'}, 
-    #     'output' : {2: 'height', 3: 'width'} 
-    # }    
     onnx_filename = "output/image_color.onnx"
 
     torch.onnx.export(model, (dummy_input), onnx_filename, 
         verbose=False, 
         input_names=input_names, 
         output_names=output_names,
-        # dynamic_axes=dynamic_axes,
     )
 
     # 3. Check onnx model file
@@ -149,7 +143,7 @@ if __name__ == "__main__":
     if args.bench_mark:
         run_bench_mark()
     if args.export_onnx:
-        export_onnx_model()
+        export_onnx_model() # OK on CPU, NOK on CUDA
     
     if not (args.shape_test or args.bench_mark or args.export_onnx):
         parser.print_help()

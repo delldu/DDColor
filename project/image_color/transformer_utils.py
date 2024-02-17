@@ -49,26 +49,26 @@ def multi_head_attention_forward(query, key, value, num_heads: int,
 
     return attn_output
 
-class Linear(nn.Module):
-    def __init__(self, in_features: int, out_features: int, bias: bool = True):
-        super().__init__()
-        # in_features = 512
-        # out_features = 512
-        # bias = True
+# class Linear(nn.Module):
+#     def __init__(self, in_features: int, out_features: int, bias: bool = True):
+#         super().__init__()
+#         # in_features = 512
+#         # out_features = 512
+#         # bias = True
 
-        self.in_features = in_features
-        self.out_features = out_features
-        self.weight = nn.Parameter(torch.zeros((out_features, in_features)))
-        self.bias = nn.Parameter(torch.zeros(out_features))
+#         self.in_features = in_features
+#         self.out_features = out_features
+#         self.weight = nn.Parameter(torch.zeros((out_features, in_features)))
+#         self.bias = nn.Parameter(torch.zeros(out_features))
 
 
-    def forward(self, input):
-        return F.linear(input, self.weight, self.bias)
+#     def forward(self, input):
+#         return F.linear(input, self.weight, self.bias)
 
-    def extra_repr(self) -> str:
-        return 'in_features={}, out_features={}, bias={}'.format(
-            self.in_features, self.out_features, self.bias is not None
-        )
+#     def extra_repr(self) -> str:
+#         return 'in_features={}, out_features={}, bias={}'.format(
+#             self.in_features, self.out_features, self.bias is not None
+#         )
 
 class MultiheadAttention(nn.Module):
     def __init__(self, embed_dim, num_heads, bias=True, dropout=0.0):
@@ -81,7 +81,7 @@ class MultiheadAttention(nn.Module):
         self.in_proj_weight = nn.Parameter(torch.zeros((3 * embed_dim, embed_dim)))
 
         self.in_proj_bias = nn.Parameter(torch.zeros(3 * embed_dim))
-        self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
 
 
     def forward(self, query, key, value):
@@ -99,6 +99,7 @@ class MultiheadAttention(nn.Module):
 class SelfAttentionLayer(nn.Module):
     def __init__(self, d_model, nhead, dropout=0.0):
         super().__init__()
+        # nn.MultiheadAttention has error on ONNX export, so we replace it
         # self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
 

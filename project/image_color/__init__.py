@@ -71,14 +71,6 @@ def image_predict(grey_input_files, output_dir):
         g_lab[:, 1:3, :, :] = 0.0
         g_rgb = color_space.lab2rgb(g_lab)
 
-        # g_rgb resize to (512, 512)
-        # g_rgb = F.interpolate(g_rgb,
-        #     size=(512, 512),
-        #     mode="bilinear",
-        #     recompute_scale_factor=False,
-        #     align_corners=False,
-        # )
-
         out_ab = todos.model.forward(model, device, g_rgb)/128.0
 
         out_ab = F.interpolate(out_ab,
