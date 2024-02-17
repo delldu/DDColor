@@ -111,11 +111,11 @@ class Decoder(nn.Module):
         return nn.Sequential(*decoder_layers)
         
 
-    def layer_output(self, layer_index: int, x, encoder_layers: List[torch.Tensor]):
+    def layer_output(self, layer_index: int, x, s_x):
         '''Ugly code for support torch.jit.script'''
         for i, layer in enumerate(self.layers):
             if i == layer_index:
-                x = layer(x, encoder_layers)
+                x = layer(x, s_x)
         return x
 
 
@@ -126,10 +126,10 @@ class Decoder(nn.Module):
         # todos.debug.output_var("encoder_output_layers[2]", encoder_output_layers[2])
         # todos.debug.output_var("encoder_output_layers[3]", encoder_output_layers[3])
         # print("-" * 120)
-        x = encoder_output_layers.pop()
-        out0 = self.layer_output(0, x, encoder_output_layers)
-        out1 = self.layer_output(1, out0, encoder_output_layers)
-        out2 = self.layer_output(2, out1, encoder_output_layers)
+        (x1, x2, x3, x4) = encoder_output_layers
+        out0 = self.layer_output(0, x4, x3)
+        out1 = self.layer_output(1, out0, x2)
+        out2 = self.layer_output(2, out1, x1)
 
         out3 = self.last_shuf(out2) 
 
