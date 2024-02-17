@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# from .unet import Hook, CustomPixelShuffle_ICNR, UnetBlockWide, custom_conv_layer
 from .unet import CustomPixelShuffle_ICNR, UnetBlockWide, custom_conv_layer
 
 from .convnext import ConvNeXt
@@ -17,9 +16,7 @@ import pdb
 
 class DDColor(nn.Module):
     def __init__(self,
-                 encoder_name='convnext-l',
                  num_input_channels=3,
-                 input_size=(512, 512),
                  nf=512,
                  num_output_channels=2,
                  num_queries=100,
@@ -27,11 +24,11 @@ class DDColor(nn.Module):
                  dec_layers=9,
                 ):
         super().__init__()
-        self.MAX_H = 1024
-        self.MAX_W = 1024
+        self.MAX_H = 512
+        self.MAX_W = 512
         self.MAX_TIMES = 1
 
-        self.encoder = Encoder(encoder_name, ['norm0', 'norm1', 'norm2', 'norm3'])
+        self.encoder = Encoder('convnext-l')
 
         self.decoder = Decoder(
             nf=nf,
@@ -131,7 +128,7 @@ class Decoder(nn.Module):
 
 class Encoder(nn.Module):
 
-    def __init__(self, encoder_name, hook_names, **kwargs):
+    def __init__(self, encoder_name):
         super().__init__()
  
         if encoder_name == 'convnext-t' or encoder_name == 'convnext':
@@ -145,7 +142,6 @@ class Encoder(nn.Module):
         else:
             raise NotImplementedError
 
-        # self.hook_names = hook_names # ['norm0', 'norm1', 'norm2', 'norm3']
 
     def forward(self, x):
         return self.arch(x)
