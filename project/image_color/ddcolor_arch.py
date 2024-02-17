@@ -3,10 +3,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .unet import Hook, CustomPixelShuffle_ICNR, UnetBlockWide, custom_conv_layer
+# from .unet import Hook, CustomPixelShuffle_ICNR, UnetBlockWide, custom_conv_layer
+from .unet import CustomPixelShuffle_ICNR, UnetBlockWide, custom_conv_layer
+
 from .convnext import ConvNeXt
 from .transformer_utils import SelfAttentionLayer, CrossAttentionLayer, FFNLayer, MLP
 from .position_encoding import PositionEmbeddingSine
+
 from typing import List
 
 import todos
@@ -29,12 +32,8 @@ class DDColor(nn.Module):
         self.MAX_TIMES = 1
 
         self.encoder = Encoder(encoder_name, ['norm0', 'norm1', 'norm2', 'norm3'])
-        self.encoder.eval()
-        test_input = torch.randn(1, num_input_channels, *input_size)
-        self.encoder(test_input)
 
         self.decoder = Decoder(
-            self.encoder.hooks,
             nf=nf,
             num_queries=num_queries,
             num_scales=num_scales,
@@ -74,20 +73,13 @@ class DDColor(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, hooks,
-                 nf=512,
-                 num_queries=100,
-                 num_scales=3,
-                 dec_layers=9,
-                ):
+    def __init__(self, 
+                nf=512,
+                num_queries=100,
+                num_scales=3,
+                dec_layers=9,
+            ):
         super().__init__()
-        # hooks ?????
-        # [<basicsr.archs.ddcolor_arch_utils.unet.Hook object at 0x7fe9d5cfa640>, 
-        # <basicsr.archs.ddcolor_arch_utils.unet.Hook object at 0x7fe9cc1c94f0>, 
-        # <basicsr.archs.ddcolor_arch_utils.unet.Hook object at 0x7fe9cc1c95b0>, 
-        # <basicsr.archs.ddcolor_arch_utils.unet.Hook object at 0x7fe9cc1c9670>]
-
-        self.hooks = hooks
         self.nf = nf
 
         self.layers = self.make_layers()
@@ -97,51 +89,44 @@ class Decoder(nn.Module):
         
         self.color_decoder = MultiScaleColorDecoder(
             in_channels=[512, 512, 256],
-            num_queries=num_queries,
-            num_scales=num_scales,
-            dec_layers=dec_layers,
+            num_queries=num_queries, # 100
+            num_scales=num_scales, # 3
+            dec_layers=dec_layers, # 9
         )
-
-    def forward(self, encode_feat): 
-        # encode_feat.size() -- [1, 1536, 16, 16]
-        out0 = self.layers[0](encode_feat)
-        out1 = self.layers[1](out0) 
-        out2 = self.layers[2](out1) 
-        out3 = self.last_shuf(out2) 
-
-        out = self.color_decoder([out0, out1, out2], out3)
-           
-        return out
 
     def make_layers(self):
         decoder_layers = []
+        decoder_layers.append(UnetBlockWide(1536, 768, 512))
+        decoder_layers.append(UnetBlockWide(512, 384, 512))
+        decoder_layers.append(UnetBlockWide(512, 192, 256))
 
-        e_in_c = self.hooks[-1].feature.shape[1] # 1536
-        in_c = e_in_c # 1536
-
-        out_c = self.nf # 512
-        setup_hooks = self.hooks[-2::-1]
-        # (Pdb) for k in self.hooks: print(k)
-        # <image_color.unet.Hook object at 0x7f204c5141f0> # setup_hook3
-        # <image_color.unet.Hook object at 0x7f1faac16e20> # setup_hook2
-        # <image_color.unet.Hook object at 0x7f1faac16c10> # setup_hook1
-        # <image_color.unet.Hook object at 0x7f1faac16f70>
-        # ----------------------------
-        # (Pdb) for k in setup_hooks: print(k)
-        # <image_color.unet.Hook object at 0x7f1faac16c10>
-        # <image_color.unet.Hook object at 0x7f1faac16e20>
-        # <image_color.unet.Hook object at 0x7f204c5141f0>
-
-        for layer_index, hook in enumerate(setup_hooks):
-            feature_c = hook.feature.shape[1]
-            if layer_index == len(setup_hooks) - 1:
-                out_c = out_c // 2
-            # print("in_c === ", in_c, ", feature_c === ", feature_c, ", out_c === ", out_c)
-            decoder_layers.append(UnetBlockWide(in_c, feature_c, out_c, hook))
-            in_c = out_c
-
-        # pdb.set_trace()
         return nn.Sequential(*decoder_layers)
+        
+
+    def layer_output(self, layer_index: int, x, encoder_layers: List[torch.Tensor]):
+        '''Ugly code for support torch.jit.script'''
+        for i, layer in enumerate(self.layers):
+            if i == layer_index:
+                x = layer(x, encoder_layers)
+        return x
+
+
+    def forward(self, encoder_output_layers: List[torch.Tensor]):
+        # print("-" * 120)
+        # todos.debug.output_var("encoder_output_layers[0]", encoder_output_layers[0])
+        # todos.debug.output_var("encoder_output_layers[1]", encoder_output_layers[1])
+        # todos.debug.output_var("encoder_output_layers[2]", encoder_output_layers[2])
+        # todos.debug.output_var("encoder_output_layers[3]", encoder_output_layers[3])
+        # print("-" * 120)
+        x = encoder_output_layers.pop()
+        out0 = self.layer_output(0, x, encoder_output_layers)
+        out1 = self.layer_output(1, out0, encoder_output_layers)
+        out2 = self.layer_output(2, out1, encoder_output_layers)
+
+        out3 = self.last_shuf(out2) 
+
+        out = self.color_decoder([out0, out1, out2], out3)
+        return out
 
 
 class Encoder(nn.Module):
@@ -160,22 +145,9 @@ class Encoder(nn.Module):
         else:
             raise NotImplementedError
 
-        # self.encoder_name = encoder_name
-        self.hook_names = hook_names # ['norm0', 'norm1', 'norm2', 'norm3']
-        self.hooks = self.setup_hooks()
+        # self.hook_names = hook_names # ['norm0', 'norm1', 'norm2', 'norm3']
 
-
-    def setup_hooks(self):
-        # self.hook_names -- ['norm0', 'norm1', 'norm2', 'norm3']
-        # self.arch._modules['norm0'] -- LayerNormChannelsFirst
-        # self.arch._modules['norm1'] -- LayerNormChannelsFirst
-        # self.arch._modules['norm2'] -- LayerNormChannelsFirst
-        # self.arch._modules['norm3'] -- LayerNormChannelsFirst
-        
-        hooks = [Hook(self.arch._modules[name]) for name in self.hook_names]
-        return hooks
-
-    def forward(self, x) -> List[torch.Tensor]:
+    def forward(self, x):
         return self.arch(x)
     
 
@@ -244,11 +216,11 @@ class MultiScaleColorDecoder(nn.Module):
 
     def forward(self, x, img_features):
         # x is a list of multi-scale feature
-        assert len(x) == self.num_feature_levels
+        assert len(x) == self.num_feature_levels # 3
         src = []
         pos = []
 
-        for i in range(self.num_feature_levels):
+        for i in range(self.num_feature_levels): # 3
             pos.append(self.pe_layer(x[i]).flatten(2))
             src.append(self.input_proj[i](x[i]).flatten(2) + self.level_embed.weight[i][None, :, None])
 
@@ -262,8 +234,8 @@ class MultiScaleColorDecoder(nn.Module):
         query_embed = self.query_embed.weight.unsqueeze(1).repeat(1, bs, 1)
         output = self.query_feat.weight.unsqueeze(1).repeat(1, bs, 1)
 
-        for i in range(self.dec_layers):
-            level_index = i % self.num_feature_levels
+        for i in range(self.dec_layers): # 9
+            level_index = i % self.num_feature_levels # 3
             # attention: cross-attention first
             output = self.transformer_cross_attention_layers[i](
                 output, src[level_index],

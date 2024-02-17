@@ -1,24 +1,24 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-import collections
+# import collections
 import todos
 import pdb
 
-class Hook:
-    feature = None
+# class Hook:
+#     feature = None
 
-    def __init__(self, module):
-        self.hook = module.register_forward_hook(self.hook_fn)
+#     def __init__(self, module):
+#         self.hook = module.register_forward_hook(self.hook_fn)
 
-    def hook_fn(self, module, input, output):
-        if isinstance(output, torch.Tensor):
-            self.feature = output
-        elif isinstance(output, collections.OrderedDict):
-            self.feature = output['out']
+#     def hook_fn(self, module, input, output):
+#         if isinstance(output, torch.Tensor):
+#             self.feature = output
+#         elif isinstance(output, collections.OrderedDict):
+#             self.feature = output['out']
 
-    def remove(self):
-        self.hook.remove()
+#     def remove(self):
+#         self.hook.remove()
 
 
 class SelfAttention(nn.Module):
@@ -106,11 +106,11 @@ class CustomPixelShuffle_ICNR(nn.Module):
 
 class UnetBlockWide(nn.Module):
     def __init__(self, up_in_c, x_in_c, n_out,
-                 hook,
+                 # hook,
             ):
         super().__init__()
 
-        self.hook = hook
+        # self.hook = hook
         self.shuf = CustomPixelShuffle_ICNR(up_in_c, n_out, extra_bn=True)
         self.bn = nn.BatchNorm2d(x_in_c)
         ni = n_out + x_in_c
@@ -118,10 +118,8 @@ class UnetBlockWide(nn.Module):
 
         self.relu = nn.ReLU()
 
-    def forward(self, up_in):
-        s = self.hook.feature
-        print("s ===self.hook.feature==== ", s.size())
-
+    def forward(self, up_in, encoder_layers):
+        s = encoder_layers.pop()        
         up_out = self.shuf(up_in)
         cat_x = self.relu(torch.cat([up_out, self.bn(s)], dim=1))
         return self.conv(cat_x)

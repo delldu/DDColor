@@ -27,6 +27,7 @@ class Block(nn.Module):
         input = x
         x = self.dwconv(x)
         x = x.permute(0, 2, 3, 1) # (N, C, H, W) -> (N, H, W, C)
+
         x = self.norm(x)
         x = self.pwconv1(x)
         x = self.act(x)
@@ -81,7 +82,7 @@ class ConvNeXt(nn.Module):
     def forward(self, x):
         # tensor [x] size: [1, 3, 512, 512], min: -4.686537, max: 4.506181, mean: -0.000415
 
-        last_layer = x
+        encoder_layers = []
         i = 0
         for (ds, st) in zip(self.downsample_layers, self.stages):
             x = ds(x)
@@ -89,18 +90,16 @@ class ConvNeXt(nn.Module):
 
             # self.norm0/1/2/3
             if i == 0:
-                last_layer = self.norm0(x)
+                encoder_layers.append(self.norm0(x))
             elif i == 1:
-                last_layer = self.norm1(x)
+                encoder_layers.append(self.norm1(x))
             elif i == 2:
-                last_layer = self.norm2(x)
+                encoder_layers.append(self.norm2(x))
             elif i == 3:
-                last_layer = self.norm3(x)
-            # if i == 3:
-            #     last_layer = self.norm3(x)
+                encoder_layers.append(self.norm3(x))
             i += 1
 
-        return last_layer
+        return encoder_layers
 
 class LayerNormChannelsFirst(nn.Module):
     def __init__(self, normalized_shape, eps=1e-6):

@@ -10,13 +10,11 @@ import todos
 import pdb
 
 class PositionEmbeddingSine(nn.Module):
-    """
-    This is a more standard version of the position embedding, very similar to the one
-    used by the Attention is all you need paper, generalized to work on images.
-    """
-
     def __init__(self, num_pos_feats=128, temperature=10000):
         super().__init__()
+        # num_pos_feats = 128
+        # temperature = 10000
+
         self.num_pos_feats = num_pos_feats
         self.temperature = temperature
         self.scale = 2 * math.pi
