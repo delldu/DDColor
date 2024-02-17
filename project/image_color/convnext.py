@@ -40,7 +40,7 @@ class Block(nn.Module):
         x = self.gamma * x
         x = x.permute(0, 3, 1, 2) # (N, H, W, C) -> (N, C, H, W)
 
-        x += input
+        x = x + input
         return x
 
 class ConvNeXt(nn.Module):

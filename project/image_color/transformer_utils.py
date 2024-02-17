@@ -1,16 +1,107 @@
+import math
 import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
+
+from typing import List
 import todos
 
-from typing import Optional
-
 import pdb
+
+def in_projection_packed(q, k, v, w, b) -> List[torch.Tensor]:
+    # w.size() -- [1536, 512]
+    # b.size() -- [1536]
+    w_q, w_k, w_v = w.chunk(3)
+    # (Pdb) w_q.size() -- [512, 512]
+    # (Pdb) w_k.size() -- [512, 512]
+    # (Pdb) w_v.size() -- [512, 512]
+
+    b_q, b_k, b_v = b.chunk(3)
+    # (Pdb) b_q.size(), b_k.size(), b_v.size() -- [512], [512], [512]
+
+    return F.linear(q, w_q, b_q), F.linear(k, w_k, b_k), F.linear(v, w_v, b_v)
+
+def multi_head_attention_forward(query, key, value, num_heads: int,
+    in_proj_weight, in_proj_bias, out_proj_weight, out_proj_bias):
+
+    # set up shape vars
+    tgt_len, bsz, embed_dim = query.shape
+    head_dim = embed_dim // num_heads
+
+    q, k, v = in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+
+    q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    #  pp q.size() -- [8, 256, 64]
+
+    k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+    v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+
+    B, Nt, E = q.shape
+    q_scaled = q / math.sqrt(E)
+    attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
+
+    attn_output_weights = F.softmax(attn_output_weights, dim=-1)
+
+    attn_output = torch.bmm(attn_output_weights, v)
+    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
+    attn_output = F.linear(attn_output, out_proj_weight, out_proj_bias)
+    attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
+
+    return attn_output
+
+class Linear(nn.Module):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+        super().__init__()
+        # in_features = 512
+        # out_features = 512
+        # bias = True
+
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = nn.Parameter(torch.zeros((out_features, in_features)))
+        self.bias = nn.Parameter(torch.zeros(out_features))
+
+
+    def forward(self, input):
+        return F.linear(input, self.weight, self.bias)
+
+    def extra_repr(self) -> str:
+        return 'in_features={}, out_features={}, bias={}'.format(
+            self.in_features, self.out_features, self.bias is not None
+        )
+
+class MultiheadAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads, bias=True, dropout=0.0):
+        super().__init__()
+        # embed_dim = 512
+        # num_heads = 8
+
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.in_proj_weight = nn.Parameter(torch.zeros((3 * embed_dim, embed_dim)))
+
+        self.in_proj_bias = nn.Parameter(torch.zeros(3 * embed_dim))
+        self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
+
+
+    def forward(self, query, key, value):
+        attn_output = multi_head_attention_forward(
+            query, key, value, 
+            self.num_heads,
+            self.in_proj_weight, 
+            self.in_proj_bias,
+            self.out_proj.weight, 
+            self.out_proj.bias,
+        )
+        return attn_output
+
 
 class SelfAttentionLayer(nn.Module):
     def __init__(self, d_model, nhead, dropout=0.0):
         super().__init__()
-        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        # self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
+
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
@@ -19,7 +110,8 @@ class SelfAttentionLayer(nn.Module):
 
     def forward(self, tgt, query_pos):
         q = k = self.with_pos_embed(tgt, query_pos)
-        tgt2 = self.self_attn(q, k, value=tgt, attn_mask=None, key_padding_mask=None)[0]
+        # tgt2 = self.self_attn(q, k, value=tgt, attn_mask=None, key_padding_mask=None)[0]
+        tgt2 = self.self_attn(q, k, value=tgt)
 
         tgt = tgt + self.dropout(tgt2)
         tgt = self.norm(tgt)
@@ -29,23 +121,24 @@ class SelfAttentionLayer(nn.Module):
 class CrossAttentionLayer(nn.Module):
     def __init__(self, d_model, nhead, dropout=0.0):
         super().__init__()
-        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
-
+        # self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
 
-    # def with_pos_embed(self, tensor, pos: Optional[Tensor] = None):
     def with_pos_embed(self, tensor, pos):
-        # if pos is None:
-        #     return tensor
         return tensor + pos
 
     def forward(self, tgt, memory, pos, query_pos):
+        # tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
+        #                            key=self.with_pos_embed(memory, pos),
+        #                            value=memory, attn_mask=None,
+        #                            key_padding_mask=None)
         tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
                                    key=self.with_pos_embed(memory, pos),
-                                   value=memory, attn_mask=None,
-                                   key_padding_mask=None)[0]
+                                   value=memory)
+
         tgt = tgt + self.dropout(tgt2)
         tgt = self.norm(tgt)
         
