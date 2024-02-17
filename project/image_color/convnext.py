@@ -9,7 +9,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from timm.models.layers import trunc_normal_, DropPath
+
 from typing import List
 import todos
 import pdb
@@ -33,9 +33,7 @@ class Block(nn.Module):
         self.act = nn.GELU()
         self.pwconv2 = nn.Linear(4 * dim, dim)
         self.gamma = nn.Parameter(layer_scale_init_value * torch.ones((dim)), 
-                                    requires_grad=True) if layer_scale_init_value > 0 else None
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-
+                                    requires_grad=True)
     def forward(self, x):
         input = x
         x = self.dwconv(x)
@@ -51,7 +49,7 @@ class Block(nn.Module):
 
         x = x.permute(0, 3, 1, 2) # (N, H, W, C) -> (N, C, H, W)
 
-        x = input + self.drop_path(x)
+        x += input
         return x
 
 class ConvNeXt(nn.Module):
@@ -64,13 +62,10 @@ class ConvNeXt(nn.Module):
         depths (tuple(int)): Number of blocks at each stage. Default: [3, 3, 9, 3]
         dims (int): Feature dimension at each stage. Default: [96, 192, 384, 768]
         drop_path_rate (float): Stochastic depth rate. Default: 0.
-        layer_scale_init_value (float): Init value for Layer Scale. Default: 1e-6.
-        head_init_scale (float): Init scaling value for classifier weights and biases. Default: 1.
     """
     def __init__(self, in_chans=3, num_classes=1000, 
                  depths=[3, 3, 27, 3], # [3, 3, 9, 3],
                  dims=[192, 384, 768, 1536], # [96, 192, 384, 768],
-                 layer_scale_init_value=1e-6, head_init_scale=1.,
                  drop_path_rate=0.,
             ):
         super().__init__()
@@ -93,8 +88,7 @@ class ConvNeXt(nn.Module):
         cur = 0
         for i in range(4):
             stage = nn.Sequential(
-                *[Block(dim=dims[i], drop_path=dp_rates[cur + j], 
-                layer_scale_init_value=layer_scale_init_value) for j in range(depths[i])]
+                *[Block(dim=dims[i], drop_path=dp_rates[cur + j]) for j in range(depths[i])]
             )
             self.stages.append(stage)
             cur += depths[i]
@@ -107,13 +101,6 @@ class ConvNeXt(nn.Module):
             self.add_module(layer_name, layer)
 
         self.norm = nn.LayerNorm(dims[-1], eps=1e-6) # final norm layer
-
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, (nn.Conv2d, nn.Linear)):
-            trunc_normal_(m.weight, std=.02)
-            nn.init.constant_(m.bias, 0)
 
     def forward(self, x) -> List[torch.Tensor]:
         # for i in range(4):
@@ -144,36 +131,6 @@ class ConvNeXt(nn.Module):
             i += 1
 
         return output_layers 
-        # self.norm(x.mean([-2, -1])) # global average pooling, (N, C, H, W) -> (N, C)
-
-# class LayerNorm(nn.Module):
-#     r""" LayerNorm that supports two data formats: channels_last (default) or channels_first. 
-#     The ordering of the dimensions in the inputs. channels_last corresponds to inputs with 
-#     shape (batch_size, height, width, channels) while channels_first corresponds to inputs 
-#     with shape (batch_size, channels, height, width).
-#     """
-#     def __init__(self, normalized_shape, eps=1e-6, data_format="channels_last"):
-#         super().__init__()
-#         self.weight = nn.Parameter(torch.ones(normalized_shape))
-#         self.bias = nn.Parameter(torch.zeros(normalized_shape))
-#         self.eps = eps
-#         self.data_format = data_format
-#         if self.data_format not in ["channels_last", "channels_first"]:
-#             raise NotImplementedError 
-#         self.normalized_shape = (normalized_shape, )
-#         print("-------- LayerNorm: ", data_format)
-    
-#     def forward(self, x):
-#         if self.data_format == "channels_last":  # B H W C
-#             return F.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
-#         elif self.data_format == "channels_first":  # B C H W
-#             pdb.set_trace()
-
-#             u = x.mean(1, keepdim=True)
-#             s = (x - u).pow(2).mean(1, keepdim=True)
-#             x = (x - u) / torch.sqrt(s + self.eps)
-#             x = self.weight[:, None, None] * x + self.bias[:, None, None]
-#             return x
 
 class LayerNormChannelsFirst(nn.Module):
     def __init__(self, normalized_shape, eps=1e-6):
