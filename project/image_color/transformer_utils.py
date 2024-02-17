@@ -23,10 +23,7 @@ class SelfAttentionLayer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def with_pos_embed(self, tensor, pos: Optional[Tensor]):
-        # if pos is None:
-        #     pdb.set_trace()
-        # return tensor if pos is None else tensor + pos
+    def with_pos_embed(self, tensor, pos):
         return tensor + pos
 
     def forward_post(self, tgt,
@@ -81,10 +78,7 @@ class CrossAttentionLayer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def with_pos_embed(self, tensor, pos: Optional[Tensor]):
-        # if pos is None:
-        #     pdb.set_trace()
-        # return tensor if pos is None else tensor + pos
+    def with_pos_embed(self, tensor, pos):
         return tensor + pos
 
     def forward_post(self, tgt, memory,
@@ -148,10 +142,7 @@ class FFNLayer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def with_pos_embed(self, tensor, pos: Optional[Tensor]):
-        # if pos is None:
-        #     pdb.set_trace()
-        # return tensor if pos is None else tensor + pos
+    def with_pos_embed(self, tensor, pos):
         return tensor + pos
 
     def forward_post(self, tgt):

@@ -72,12 +72,12 @@ def image_predict(grey_input_files, output_dir):
         g_rgb = color_space.lab2rgb(g_lab)
 
         # g_rgb resize to (512, 512)
-        g_rgb = F.interpolate(g_rgb,
-            size=(512, 512),
-            mode="bilinear",
-            recompute_scale_factor=False,
-            align_corners=False,
-        )
+        # g_rgb = F.interpolate(g_rgb,
+        #     size=(512, 512),
+        #     mode="bilinear",
+        #     recompute_scale_factor=False,
+        #     align_corners=False,
+        # )
 
         out_ab = todos.model.forward(model, device, g_rgb)/128.0
 
@@ -93,4 +93,7 @@ def image_predict(grey_input_files, output_dir):
 
         output_file = f"{output_dir}/{os.path.basename(g_filename)}"
 
+        # (Pdb) g_input_tensor.size() -- [1, 3, 678, 1020]
+        # (Pdb) predict_tensor.size() -- [1, 3, 678, 1020]
+        # (Pdb) g_rgb.size() -- [1, 3, 512, 512]
         todos.data.save_tensor([g_input_tensor, predict_tensor], output_file)

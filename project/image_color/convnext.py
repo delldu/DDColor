@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import trunc_normal_, DropPath
 from typing import List
-
+import todos
 import pdb
 
 class Block(nn.Module):
@@ -46,6 +46,9 @@ class Block(nn.Module):
         x = self.pwconv2(x)
         if self.gamma is not None:
             x = self.gamma * x
+        else:
+            pdb.set_trace()
+
         x = x.permute(0, 3, 1, 2) # (N, H, W, C) -> (N, C, H, W)
 
         x = input + self.drop_path(x)
@@ -65,9 +68,11 @@ class ConvNeXt(nn.Module):
         head_init_scale (float): Init scaling value for classifier weights and biases. Default: 1.
     """
     def __init__(self, in_chans=3, num_classes=1000, 
-                 depths=[3, 3, 9, 3], dims=[96, 192, 384, 768], drop_path_rate=0., 
+                 depths=[3, 3, 27, 3], # [3, 3, 9, 3],
+                 dims=[192, 384, 768, 1536], # [96, 192, 384, 768],
                  layer_scale_init_value=1e-6, head_init_scale=1.,
-                 ):
+                 drop_path_rate=0.,
+            ):
         super().__init__()
 
         self.downsample_layers = nn.ModuleList() # stem and 3 intermediate downsampling conv layers
@@ -121,7 +126,7 @@ class ConvNeXt(nn.Module):
         #     # x = norm_layer(x)
         #     norm_layer(x)
 
-        convnext_layers_output = []
+        output_layers: List[torch.Tensor] = []
         i = 0
         for (ds, st) in zip(self.downsample_layers, self.stages):
             x = ds(x)
@@ -129,16 +134,17 @@ class ConvNeXt(nn.Module):
 
             # self.norm0/1/2/3
             if i == 0:
-                convnext_layers_output.append(self.norm0(x))
+                output_layers.append(self.norm0(x))
             elif i == 1:
-                convnext_layers_output.append(self.norm1(x))
+                output_layers.append(self.norm1(x))
             elif i == 2:
-                convnext_layers_output.append(self.norm2(x))
+                output_layers.append(self.norm2(x))
             elif i == 3:
-                convnext_layers_output.append(self.norm3(x))
+                output_layers.append(self.norm3(x))
             i += 1
 
-        return convnext_layers_output # self.norm(x.mean([-2, -1])) # global average pooling, (N, C, H, W) -> (N, C)
+        return output_layers 
+        # self.norm(x.mean([-2, -1])) # global average pooling, (N, C, H, W) -> (N, C)
 
 # class LayerNorm(nn.Module):
 #     r""" LayerNorm that supports two data formats: channels_last (default) or channels_first. 

@@ -1,6 +1,7 @@
 import os
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .unet import Hook, CustomPixelShuffle_ICNR,  UnetBlockWide, NormType, custom_conv_layer
 from .convnext import ConvNeXt
@@ -24,6 +25,10 @@ class DDColor(nn.Module):
                  dec_layers=9,
                 ):
         super().__init__()
+        self.MAX_H = 1024
+        self.MAX_W = 1024
+        self.MAX_TIMES = 1
+
         self.encoder = Encoder(encoder_name, ['norm0', 'norm1', 'norm2', 'norm3'])
         self.encoder.eval()
         test_input = torch.randn(1, num_input_channels, *input_size)
@@ -61,7 +66,15 @@ class DDColor(nn.Module):
         #     x = x.half()
         if x.shape[1] == 3: # True
             x = self.normalize(x)
+        else:
+            pdb.set_trace()
         
+        x = F.interpolate(x,
+            size=(512, 512),
+            mode="bilinear",
+            recompute_scale_factor=False,
+            align_corners=False,
+        )
         encoder_layers = self.encoder(x)
         out_feat = self.decoder()
         coarse_input = torch.cat([out_feat, x], dim=1)
