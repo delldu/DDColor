@@ -102,12 +102,8 @@ class Decoder(nn.Module):
             dec_layers=dec_layers,
         )
 
-    def forward(self, encoder_layers: List[torch.Tensor]):
-        # self.hooks[-1] -- <basicsr.archs.ddcolor_arch_utils.unet.Hook object>
-        encode_feat = self.hooks[-1].feature # size() -- [1, 1536, 16, 16] ???
+    def forward(self, encode_feat): 
         # encode_feat.size() -- [1, 1536, 16, 16]
-        # encoder_layers[3].size() -- [1, 1536, 16, 16]
-
         out0 = self.layers[0](encode_feat)
         out1 = self.layers[1](out0) 
         out2 = self.layers[2](out1) 
@@ -140,7 +136,7 @@ class Decoder(nn.Module):
             feature_c = hook.feature.shape[1]
             if layer_index == len(setup_hooks) - 1:
                 out_c = out_c // 2
-            print("in_c === ", in_c, ", feature_c === ", feature_c, ", out_c === ", out_c)
+            # print("in_c === ", in_c, ", feature_c === ", feature_c, ", out_c === ", out_c)
             decoder_layers.append(UnetBlockWide(in_c, feature_c, out_c, hook))
             in_c = out_c
 

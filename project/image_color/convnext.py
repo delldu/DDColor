@@ -10,7 +10,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import List
 import todos
 import pdb
 
@@ -79,20 +78,10 @@ class ConvNeXt(nn.Module):
 
         self.norm = nn.LayerNorm(dims[-1], eps=1e-6) # final norm layer
 
-    def forward(self, x) -> List[torch.Tensor]:
+    def forward(self, x):
         # tensor [x] size: [1, 3, 512, 512], min: -4.686537, max: 4.506181, mean: -0.000415
 
-        # for i in range(4):
-        #     x = self.downsample_layers[i](x)
-        #     x = self.stages[i](x)
-
-        #     # add extra norm
-        #     norm_layer = getattr(self, f'norm{i}')
-        #     # self.norm0/1/2/3
-        #     # x = norm_layer(x)
-        #     norm_layer(x)
-
-        output_layers: List[torch.Tensor] = []
+        last_layer = x
         i = 0
         for (ds, st) in zip(self.downsample_layers, self.stages):
             x = ds(x)
@@ -100,21 +89,18 @@ class ConvNeXt(nn.Module):
 
             # self.norm0/1/2/3
             if i == 0:
-                output_layers.append(self.norm0(x))
+                last_layer = self.norm0(x)
             elif i == 1:
-                output_layers.append(self.norm1(x))
+                last_layer = self.norm1(x)
             elif i == 2:
-                output_layers.append(self.norm2(x))
+                last_layer = self.norm2(x)
             elif i == 3:
-                output_layers.append(self.norm3(x))
+                last_layer = self.norm3(x)
+            # if i == 3:
+            #     last_layer = self.norm3(x)
             i += 1
 
-        # (Pdb) for i in range(len(output_layers)): print(output_layers[i].size())
-        # torch.Size([1, 192, 128, 128])
-        # torch.Size([1, 384, 64, 64])
-        # torch.Size([1, 768, 32, 32])
-        # torch.Size([1, 1536, 16, 16])
-        return output_layers 
+        return last_layer
 
 class LayerNormChannelsFirst(nn.Module):
     def __init__(self, normalized_shape, eps=1e-6):
