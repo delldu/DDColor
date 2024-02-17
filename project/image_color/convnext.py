@@ -48,7 +48,6 @@ class Block(nn.Module):
         else:
             pdb.set_trace()
 
-        pdb.set_trace()
         x = x.permute(0, 3, 1, 2) # (N, H, W, C) -> (N, C, H, W)
 
         x += input
