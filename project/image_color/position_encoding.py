@@ -21,7 +21,8 @@ class PositionEmbeddingSine(nn.Module):
         self.temperature = temperature
         self.scale = 2 * math.pi
 
-    def forward(self, x, mask=None):
+    # def forward(self, x, mask=None):
+    def forward(self, x):
         not_mask = torch.ones((x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool)
         y_embed = not_mask.cumsum(1, dtype=torch.float32)
         x_embed = not_mask.cumsum(2, dtype=torch.float32)

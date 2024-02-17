@@ -190,9 +190,7 @@ class MultiScaleColorDecoder(nn.Module):
         nheads=8,
         dim_feedforward=2048,
         dec_layers=9,
-        pre_norm=False,
         color_embed_dim=256,
-        enforce_input_project=True,
         num_scales=3
     ):
         super().__init__()
@@ -201,7 +199,6 @@ class MultiScaleColorDecoder(nn.Module):
         self.pe_layer = PositionEmbeddingSine(hidden_dim // 2)
 
         # define Transformer decoder here
-        # self.num_heads = nheads
         self.dec_layers = dec_layers
         self.transformer_self_attention_layers = nn.ModuleList()
         self.transformer_cross_attention_layers = nn.ModuleList()
@@ -213,7 +210,6 @@ class MultiScaleColorDecoder(nn.Module):
                     d_model=hidden_dim,
                     nhead=nheads,
                     dropout=0.0,
-                    normalize_before=pre_norm,
                 )
             )
             self.transformer_cross_attention_layers.append(
@@ -221,7 +217,6 @@ class MultiScaleColorDecoder(nn.Module):
                     d_model=hidden_dim,
                     nhead=nheads,
                     dropout=0.0,
-                    normalize_before=pre_norm,
                 )
             )
             self.transformer_ffn_layers.append(
@@ -229,13 +224,11 @@ class MultiScaleColorDecoder(nn.Module):
                     d_model=hidden_dim,
                     dim_feedforward=dim_feedforward,
                     dropout=0.0,
-                    normalize_before=pre_norm,
                 )
             )
         
         self.decoder_norm = nn.LayerNorm(hidden_dim)
 
-        # self.num_queries = num_queries
         # learnable color query features
         self.query_feat = nn.Embedding(num_queries, hidden_dim)
         # learnable color query p.e.
@@ -248,14 +241,7 @@ class MultiScaleColorDecoder(nn.Module):
         # input projections
         self.input_proj = nn.ModuleList()
         for i in range(self.num_feature_levels):
-            if in_channels[i] != hidden_dim or enforce_input_project:
-                self.input_proj.append(nn.Conv2d(in_channels[i], hidden_dim, kernel_size=1))
-                nn.init.kaiming_uniform_(self.input_proj[-1].weight, a=1)
-                if self.input_proj[-1].bias is not None:
-                    nn.init.constant_(self.input_proj[-1].bias, 0)
-            else:
-                self.input_proj.append(nn.Sequential())
-                pdb.set_trace()
+            self.input_proj.append(nn.Conv2d(in_channels[i], hidden_dim, kernel_size=1))
 
         # output FFNs
         self.color_embed = MLP(hidden_dim, hidden_dim, color_embed_dim, 3)
@@ -267,7 +253,7 @@ class MultiScaleColorDecoder(nn.Module):
         pos = []
 
         for i in range(self.num_feature_levels):
-            pos.append(self.pe_layer(x[i], None).flatten(2))
+            pos.append(self.pe_layer(x[i]).flatten(2))
             src.append(self.input_proj[i](x[i]).flatten(2) + self.level_embed.weight[i][None, :, None])
 
             # flatten NxCxHxW to HWxNxC
