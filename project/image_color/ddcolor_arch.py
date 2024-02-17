@@ -58,16 +58,8 @@ class DDColor(nn.Module):
     def normalize(self, img):
         return (img - self.mean) / self.std
 
-    # def denormalize(self, img):
-    #     return img * self.std + self.mean
-
     def forward(self, x):
-        # if x.is_cuda:
-        #     x = x.half()
-        if x.shape[1] == 3: # True
-            x = self.normalize(x)
-        else:
-            pdb.set_trace()
+        x = self.normalize(x)
         
         x = F.interpolate(x,
             size=(512, 512),
@@ -208,8 +200,7 @@ class MultiScaleColorDecoder(nn.Module):
         super().__init__()
 
         # positional encoding
-        N_steps = hidden_dim // 2
-        self.pe_layer = PositionEmbeddingSine(N_steps, normalize=True)
+        self.pe_layer = PositionEmbeddingSine(hidden_dim // 2)
 
         # define Transformer decoder here
         self.num_heads = nheads
@@ -266,6 +257,7 @@ class MultiScaleColorDecoder(nn.Module):
                     nn.init.constant_(self.input_proj[-1].bias, 0)
             else:
                 self.input_proj.append(nn.Sequential())
+                pdb.set_trace()
 
         # output FFNs
         self.color_embed = MLP(hidden_dim, hidden_dim, color_embed_dim, 3)
@@ -305,9 +297,7 @@ class MultiScaleColorDecoder(nn.Module):
                 query_pos=query_embed
             )
             # FFN
-            output = self.transformer_ffn_layers[i](
-                output
-            )
+            output = self.transformer_ffn_layers[i](output)
 
         decoder_output = self.decoder_norm(output)
         decoder_output = decoder_output.transpose(0, 1)  # [N, bs, C]  -> [bs, N, C]
