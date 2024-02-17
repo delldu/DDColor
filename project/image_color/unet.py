@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-
+from typing import Tuple
 import todos
 import pdb
 
@@ -100,6 +100,7 @@ class UnetBlockWide(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, up_in, s):
+        # print("up_in.size(), s.size() ---- ", up_in.size(), s.size())
         up_out = self.shuf(up_in)
         cat_x = self.relu(torch.cat([up_out, self.bn(s)], dim=1))
         return self.conv(cat_x)

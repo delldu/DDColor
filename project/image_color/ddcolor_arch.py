@@ -9,7 +9,7 @@ from .convnext import ConvNeXt
 from .transformer_utils import SelfAttentionLayer, CrossAttentionLayer, FFNLayer, MLP
 from .position_encoding import PositionEmbeddingSine
 
-from typing import List
+from typing import List, Tuple
 
 import todos
 import pdb
@@ -46,14 +46,15 @@ class DDColor(nn.Module):
 
         # Remove spectral normal 
         nn.utils.remove_spectral_norm(self.refine_net[0][0])
-        nn.utils.remove_spectral_norm(self.decoder.layers[0].conv[0])
-        nn.utils.remove_spectral_norm(self.decoder.layers[1].conv[0])
-        nn.utils.remove_spectral_norm(self.decoder.layers[2].conv[0])
-        nn.utils.remove_spectral_norm(self.decoder.layers[0].shuf.conv[0])
-        nn.utils.remove_spectral_norm(self.decoder.layers[1].shuf.conv[0])
-        nn.utils.remove_spectral_norm(self.decoder.layers[2].shuf.conv[0])
+        for i in range(3):
+            nn.utils.remove_spectral_norm(self.decoder.layers[i].conv[0])
+            nn.utils.remove_spectral_norm(self.decoder.layers[i].shuf.conv[0])
         nn.utils.remove_spectral_norm(self.decoder.last_shuf.conv[0])
 
+        # pdb.set_trace()
+        # torch.jit.script(self.encoder)
+        # torch.jit.script(self.decoder)
+        # torch.jit.script(self.refine_net)
 
     def load_weights(self, model_path="models/image_color.pth"):
         cdir = os.path.dirname(__file__)
@@ -72,7 +73,8 @@ class DDColor(nn.Module):
             recompute_scale_factor=False,
             align_corners=False,
         )
-        encoder_layers = self.encoder(x)
+        encoder_layers: List[torch.Tensor] = self.encoder(x)
+
         out_feat = self.decoder(encoder_layers)
         coarse_input = torch.cat([out_feat, x], dim=1)
         out = self.refine_net(coarse_input)
@@ -102,6 +104,7 @@ class Decoder(nn.Module):
             dec_layers=dec_layers, # 9
         )
 
+
     def make_layers(self):
         decoder_layers = []
         decoder_layers.append(UnetBlockWide(1536, 768, 512))
@@ -119,17 +122,17 @@ class Decoder(nn.Module):
         return x
 
 
-    def forward(self, encoder_output_layers: List[torch.Tensor]):
+    def forward(self, encoder_output_layers: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]):
         # print("-" * 120)
         # todos.debug.output_var("encoder_output_layers[0]", encoder_output_layers[0])
         # todos.debug.output_var("encoder_output_layers[1]", encoder_output_layers[1])
         # todos.debug.output_var("encoder_output_layers[2]", encoder_output_layers[2])
         # todos.debug.output_var("encoder_output_layers[3]", encoder_output_layers[3])
         # print("-" * 120)
-        (x1, x2, x3, x4) = encoder_output_layers
-        out0 = self.layer_output(0, x4, x3)
-        out1 = self.layer_output(1, out0, x2)
-        out2 = self.layer_output(2, out1, x1)
+        (x0, x1, x2, x3) = encoder_output_layers
+        out0 = self.layer_output(0, x3, x2)
+        out1 = self.layer_output(1, out0, x1)
+        out2 = self.layer_output(2, out1, x0)
 
         out3 = self.last_shuf(out2) 
 
@@ -154,7 +157,7 @@ class Encoder(nn.Module):
             raise NotImplementedError
 
 
-    def forward(self, x):
+    def forward(self, x) -> List[torch.Tensor]:
         return self.arch(x)
     
 
@@ -210,36 +213,43 @@ class MultiScaleColorDecoder(nn.Module):
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
 
         # level embedding
-        self.num_feature_levels = num_scales
+        self.num_feature_levels = num_scales # 3
         self.level_embed = nn.Embedding(self.num_feature_levels, hidden_dim)
 
         # input projections
         self.input_proj = nn.ModuleList()
-        for i in range(self.num_feature_levels):
+        for i in range(self.num_feature_levels): # 3
             self.input_proj.append(nn.Conv2d(in_channels[i], hidden_dim, kernel_size=1))
 
         # output FFNs
         self.color_embed = MLP(hidden_dim, hidden_dim, color_embed_dim, 3)
 
-    def forward(self, x, img_features):
+
+    def forward(self, x: List[torch.Tensor], img_features):
         # x is list: len = 3
         #     tensor [item] size: [1, 512, 32, 32], min: -2.036234, max: 162340.96875, mean: 3001.375
         #     tensor [item] size: [1, 512, 64, 64], min: -2.632989, max: 835685120.0, mean: 68049544.0
         #     tensor [item] size: [1, 256, 128, 128], min: -2.94301, max: 1553683709952.0, mean: 143206252544.0
         # tensor [img_features] size: [1, 256, 512, 512], min: 0.0, max: 222161108992.0, mean: 1800433664.0
 
-        # x is a list of multi-scale feature
-        assert len(x) == self.num_feature_levels # 3
         src = []
         pos = []
 
-        for i in range(self.num_feature_levels): # 3
-            pos.append(self.pe_layer(x[i]).flatten(2))
-            src.append(self.input_proj[i](x[i]).flatten(2) + self.level_embed.weight[i][None, :, None])
+        # for i in range(self.num_feature_levels): # 3
+        #     pos_temp = self.pe_layer(x[i]).flatten(2).permute(2, 0, 1)
+        #     # self.level_embed.weight.size() -- [3, 256]
+        #     src_temp = self.input_proj[i](x[i]).flatten(2) + self.level_embed.weight[i][None, :, None]
+        #     src_temp = src_temp.permute(2, 0, 1)
+        #     pos.append(pos_temp)
+        #     src.append(src_temp)
+        for i, layer in enumerate(self.input_proj):
+            pos_temp = self.pe_layer(x[i]).flatten(2).permute(2, 0, 1)
+            # self.level_embed.weight.size() -- [3, 256]
+            src_temp = layer(x[i]).flatten(2) + self.level_embed.weight[i][None, :, None]
+            src_temp = src_temp.permute(2, 0, 1)
+            pos.append(pos_temp)
+            src.append(src_temp)
 
-            # flatten NxCxHxW to HWxNxC
-            pos[-1] = pos[-1].permute(2, 0, 1)
-            src[-1] = src[-1].permute(2, 0, 1)    
 
         # pdb.set_trace()
         _, bs, _ = src[0].shape # [1024, 1, 256]
@@ -248,18 +258,29 @@ class MultiScaleColorDecoder(nn.Module):
         query_embed = self.query_embed.weight.unsqueeze(1).repeat(1, bs, 1)
         output = self.query_feat.weight.unsqueeze(1).repeat(1, bs, 1)
 
-        for i in range(self.dec_layers): # 9
+        # for i in range(self.dec_layers): # 9
+        #     level_index = i % self.num_feature_levels # 3
+        #     # attention: cross-attention first
+        #     output = self.transformer_cross_attention_layers[i](
+        #         output, src[level_index],
+        #         pos=pos[level_index], query_pos=query_embed
+        #     )
+        #     output = self.transformer_self_attention_layers[i](output, query_pos=query_embed)
+        #     # FFN
+        #     output = self.transformer_ffn_layers[i](output)
+        i = 0
+        for (cross_layer, self_layer, ffn_layer) in zip(self.transformer_cross_attention_layers, 
+            self.transformer_self_attention_layers,
+            self.transformer_ffn_layers,
+            ):
+
             level_index = i % self.num_feature_levels # 3
             # attention: cross-attention first
-            output = self.transformer_cross_attention_layers[i](
-                output, src[level_index],
-                pos=pos[level_index], query_pos=query_embed
-            )
-            output = self.transformer_self_attention_layers[i](output,
-                query_pos=query_embed
-            )
+            output = cross_layer(output, src[level_index], pos=pos[level_index], query_pos=query_embed)
+            output = self_layer(output, query_pos=query_embed)
             # FFN
-            output = self.transformer_ffn_layers[i](output)
+            output = ffn_layer(output)
+            i = i + 1
 
         # output.size() -- [100, 1, 256]
         decoder_output = self.decoder_norm(output) # size() -- [100, 1, 256]

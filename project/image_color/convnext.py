@@ -9,6 +9,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import List, Tuple
 
 import todos
 import pdb
@@ -79,10 +80,11 @@ class ConvNeXt(nn.Module):
 
         self.norm = nn.LayerNorm(dims[-1], eps=1e-6) # final norm layer
 
-    def forward(self, x):
+    def forward(self, x) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         # tensor [x] size: [1, 3, 512, 512], min: -4.686537, max: 4.506181, mean: -0.000415
 
-        encoder_layers = []
+        # encoder_layers: List[torch.Tensor] = []
+        x0 = x1 = x2 = x3 = x
         i = 0
         for (ds, st) in zip(self.downsample_layers, self.stages):
             x = ds(x)
@@ -90,16 +92,16 @@ class ConvNeXt(nn.Module):
 
             # self.norm0/1/2/3
             if i == 0:
-                encoder_layers.append(self.norm0(x))
+                x0 = self.norm0(x)
             elif i == 1:
-                encoder_layers.append(self.norm1(x))
+                x1 = self.norm1(x)
             elif i == 2:
-                encoder_layers.append(self.norm2(x))
+                x2 = self.norm2(x)
             elif i == 3:
-                encoder_layers.append(self.norm3(x))
+                x3 = self.norm3(x)
             i += 1
 
-        return encoder_layers
+        return (x0, x1, x2, x3)
 
 class LayerNormChannelsFirst(nn.Module):
     def __init__(self, normalized_shape, eps=1e-6):
