@@ -69,7 +69,7 @@ class DDColor(nn.Module):
             align_corners=False,
         )
         encoder_layers = self.encoder(x)
-        out_feat = self.decoder()
+        out_feat = self.decoder(encoder_layers)
         coarse_input = torch.cat([out_feat, x], dim=1)
         out = self.refine_net(coarse_input)
 
@@ -79,7 +79,7 @@ class DDColor(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, hooks,
                  nf=512,
-                 blur=True,
+                 # blur=True,
                  last_norm='Spectral',
                  num_queries=100,
                  num_scales=3,
@@ -94,13 +94,19 @@ class Decoder(nn.Module):
 
         self.hooks = hooks
         self.nf = nf
-        self.blur = blur
+        # self.blur = blur
         self.last_norm = getattr(NormType, last_norm)
+        # self.last_norm -- <NormType.Spectral: 4>
+
+        # print("self.blur ==== ", self.blur)
+        # if not self.blur:
+        #     pdb.set_trace() 
 
         self.layers = self.make_layers()
         embed_dim = nf // 2
 
-        self.last_shuf = CustomPixelShuffle_ICNR(embed_dim, embed_dim, blur=self.blur, 
+        self.last_shuf = CustomPixelShuffle_ICNR(embed_dim, embed_dim, 
+            # blur=self.blur, 
             norm_type=self.last_norm, scale=4)
         
         self.color_decoder = MultiScaleColorDecoder(
@@ -110,9 +116,13 @@ class Decoder(nn.Module):
             dec_layers=dec_layers,
         )
 
-    def forward(self):
+    def forward(self, encoder_layers: List[torch.Tensor]):
         # self.hooks[-1] -- <basicsr.archs.ddcolor_arch_utils.unet.Hook object>
         encode_feat = self.hooks[-1].feature # size() -- [1, 1536, 16, 16] ???
+        # encode_feat.size() -- [1, 1536, 16, 16]
+        # encoder_layers[3].size() -- [1, 1536, 16, 16]
+
+
         out0 = self.layers[0](encode_feat)
         out1 = self.layers[1](out0) 
         out2 = self.layers[2](out1) 
@@ -125,10 +135,10 @@ class Decoder(nn.Module):
     def make_layers(self):
         decoder_layers = []
 
-        e_in_c = self.hooks[-1].feature.shape[1]
-        in_c = e_in_c
+        e_in_c = self.hooks[-1].feature.shape[1] # 1536
+        in_c = e_in_c # 1536
 
-        out_c = self.nf
+        out_c = self.nf # 512
         setup_hooks = self.hooks[-2::-1]
         # (Pdb) for k in self.hooks: print(k)
         # <image_color.unet.Hook object at 0x7f204c5141f0> # setup_hook3
@@ -145,9 +155,12 @@ class Decoder(nn.Module):
             feature_c = hook.feature.shape[1]
             if layer_index == len(setup_hooks) - 1:
                 out_c = out_c // 2
-            decoder_layers.append(UnetBlockWide(in_c, feature_c, out_c, hook, blur=self.blur, self_attention=False,
-                    norm_type=NormType.Spectral))
+            print("in_c === ", in_c, ", feature_c === ", feature_c, ", out_c === ", out_c)
+            decoder_layers.append(UnetBlockWide(in_c, feature_c, out_c, hook,  
+                self_attention=False, norm_type=NormType.Spectral))
             in_c = out_c
+
+        # pdb.set_trace()
         return nn.Sequential(*decoder_layers)
 
 

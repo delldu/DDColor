@@ -80,6 +80,8 @@ class ConvNeXt(nn.Module):
         self.norm = nn.LayerNorm(dims[-1], eps=1e-6) # final norm layer
 
     def forward(self, x) -> List[torch.Tensor]:
+        # tensor [x] size: [1, 3, 512, 512], min: -4.686537, max: 4.506181, mean: -0.000415
+
         # for i in range(4):
         #     x = self.downsample_layers[i](x)
         #     x = self.stages[i](x)
@@ -107,6 +109,11 @@ class ConvNeXt(nn.Module):
                 output_layers.append(self.norm3(x))
             i += 1
 
+        # (Pdb) for i in range(len(output_layers)): print(output_layers[i].size())
+        # torch.Size([1, 192, 128, 128])
+        # torch.Size([1, 384, 64, 64])
+        # torch.Size([1, 768, 32, 32])
+        # torch.Size([1, 1536, 16, 16])
         return output_layers 
 
 class LayerNormChannelsFirst(nn.Module):
