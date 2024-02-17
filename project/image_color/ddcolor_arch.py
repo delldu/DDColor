@@ -285,13 +285,9 @@ class MultiScaleColorDecoder(nn.Module):
             # attention: cross-attention first
             output = self.transformer_cross_attention_layers[i](
                 output, src[level_index],
-                memory_mask=None,
-                memory_key_padding_mask=None,
                 pos=pos[level_index], query_pos=query_embed
             )
-            output = self.transformer_self_attention_layers[i](
-                output, tgt_mask=None,
-                tgt_key_padding_mask=None,
+            output = self.transformer_self_attention_layers[i](output,
                 query_pos=query_embed
             )
             # FFN

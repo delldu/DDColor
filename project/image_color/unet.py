@@ -1,13 +1,9 @@
-from enum import Enum
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import collections
 import todos
 import pdb
-
-NormType = Enum('NormType', 'Batch BatchZero Weight Spectral')
-
 
 class Hook:
     feature = None
@@ -42,29 +38,7 @@ class SelfAttention(nn.Module):
         o = self.gamma * torch.bmm(h, beta) + x
         return o.view(*size).contiguous()
 
-
-def batchnorm_2d(nf: int, norm_type: NormType = NormType.Batch):
-    "A batchnorm2d layer with `nf` features initialized depending on `norm_type`."
-    print("norm_type == NormType.BatchZero: ", norm_type == NormType.BatchZero)
-    bn = nn.BatchNorm2d(nf)
-    with torch.no_grad():
-        bn.bias.fill_(1e-3)
-        bn.weight.fill_(0. if norm_type == NormType.BatchZero else 1.)
-    return bn
-
-
-def init_default(m: nn.Module, func=nn.init.kaiming_normal_) -> None:
-    "Initialize `m` weights with `func` and set `bias` to 0."
-    if func:
-        if hasattr(m, 'weight'): func(m.weight)
-        if hasattr(m, 'bias') and hasattr(m.bias, 'data'): m.bias.data.fill_(0.)
-    else:
-        pdb.set_trace()
-
-    return m
-
 def icnr(x, scale=2, init=nn.init.kaiming_normal_):
-    "ICNR init of `x`, with `scale` and `init` function."
     ni, nf, h, w = x.shape
     ni2 = int(ni / (scale**2))
     k = init(torch.zeros([ni2, nf, h, w])).transpose(0, 1)
@@ -81,7 +55,6 @@ def conv1d(ni: int, no: int, ks: int = 1, stride: int = 1, padding: int = 0, bia
     if bias: conv.bias.data.zero_()
     return nn.utils.spectral_norm(conv)
 
-
 def custom_conv_layer(ni, nf,
     ks = 3,
     stride = 1,
@@ -89,11 +62,7 @@ def custom_conv_layer(ni, nf,
     extra_bn = False, # True || False
 ):
     padding = (ks - 1) // 2
-    conv_func = nn.Conv2d
-    conv = init_default(
-        conv_func(ni, nf, kernel_size=ks, bias=not extra_bn, stride=stride, padding=padding),
-        nn.init.kaiming_normal_,
-    )
+    conv = nn.Conv2d(ni, nf, kernel_size=ks, bias=not extra_bn, stride=stride, padding=padding)
     conv = nn.utils.spectral_norm(conv)
     layers = [conv]
 
@@ -106,18 +75,15 @@ def custom_conv_layer(ni, nf,
 
 
 class CustomPixelShuffle_ICNR(nn.Module):
-    def __init__(self,
-                 ni: int,
-                 nf: int = None,
-                 scale: int = 2, # 2 | 4
+    def __init__(self, ni, nf,
+                 scale=2, # 2 | 4
                  extra_bn=False): # True | False
         super().__init__()
         # ni = 1536
         # nf = 512
         # scale = 2
 
-        self.conv = custom_conv_layer(
-            ni, nf * (scale**2), ks=1, use_activ=False, extra_bn=extra_bn)
+        self.conv = custom_conv_layer(ni, nf * (scale**2), ks=1, use_activ=False, extra_bn=extra_bn)
         # self.conv ----
         # Sequential(
         #   (0): Conv2d(1536, 2048, kernel_size=(1, 1), stride=(1, 1), bias=False)
@@ -139,21 +105,15 @@ class CustomPixelShuffle_ICNR(nn.Module):
 
 
 class UnetBlockWide(nn.Module):
-    "A quasi-UNet block, using `PixelShuffle_ICNR upsampling`."
-
-    def __init__(self,
-                 up_in_c: int,
-                 x_in_c: int,
-                 n_out: int,
+    def __init__(self, up_in_c, x_in_c, n_out,
                  hook,
             ):
         super().__init__()
 
         self.hook = hook
-        up_out = n_out
-        self.shuf = CustomPixelShuffle_ICNR(up_in_c, up_out, extra_bn=True)
-        self.bn = batchnorm_2d(x_in_c)
-        ni = up_out + x_in_c
+        self.shuf = CustomPixelShuffle_ICNR(up_in_c, n_out, extra_bn=True)
+        self.bn = nn.BatchNorm2d(x_in_c)
+        ni = n_out + x_in_c
         self.conv = custom_conv_layer(ni, n_out, extra_bn=True)
 
         self.relu = nn.ReLU()
