@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from typing import Tuple
 import todos
 import pdb
 
@@ -22,15 +21,6 @@ class SelfAttention(nn.Module):
         beta = F.softmax(torch.bmm(f.permute(0, 2, 1).contiguous(), g), dim=1)
         o = self.gamma * torch.bmm(h, beta) + x
         return o.view(*size).contiguous()
-
-def icnr(x, scale=2, init=nn.init.kaiming_normal_):
-    ni, nf, h, w = x.shape
-    ni2 = int(ni / (scale**2))
-    k = init(torch.zeros([ni2, nf, h, w])).transpose(0, 1)
-    k = k.contiguous().view(ni2, nf, -1)
-    k = k.repeat(1, 1, scale**2)
-    k = k.contiguous().view([nf, ni, h, w]).transpose(0, 1)
-    x.data.copy_(k)
 
 
 def conv1d(ni: int, no: int, ks: int = 1, stride: int = 1, padding: int = 0, bias: bool = False):
@@ -59,7 +49,7 @@ def custom_conv_layer(ni, nf,
     return nn.Sequential(*layers)
 
 
-class CustomPixelShuffle_ICNR(nn.Module):
+class CustomPixelShuffle(nn.Module):
     def __init__(self, ni, nf,
                  scale=2, # 2 | 4
                  extra_bn=False): # True | False
@@ -74,7 +64,6 @@ class CustomPixelShuffle_ICNR(nn.Module):
         #   (0): Conv2d(1536, 2048, kernel_size=(1, 1), stride=(1, 1), bias=False)
         #   (1): BatchNorm2d(2048, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
         # )
-        icnr(self.conv[0].weight)
         self.shuf = nn.PixelShuffle(scale)
         
         # Blurring over (h*w) kernel
@@ -92,7 +81,7 @@ class CustomPixelShuffle_ICNR(nn.Module):
 class UnetBlockWide(nn.Module):
     def __init__(self, up_in_c, x_in_c, n_out):
         super().__init__()
-        self.shuf = CustomPixelShuffle_ICNR(up_in_c, n_out, extra_bn=True)
+        self.shuf = CustomPixelShuffle(up_in_c, n_out, extra_bn=True)
         self.bn = nn.BatchNorm2d(x_in_c)
         ni = n_out + x_in_c
         self.conv = custom_conv_layer(ni, n_out, extra_bn=True)
@@ -100,7 +89,6 @@ class UnetBlockWide(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, up_in, s):
-        # print("up_in.size(), s.size() ---- ", up_in.size(), s.size())
         up_out = self.shuf(up_in)
         cat_x = self.relu(torch.cat([up_out, self.bn(s)], dim=1))
         return self.conv(cat_x)

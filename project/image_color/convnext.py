@@ -14,6 +14,9 @@ from typing import List, Tuple
 import todos
 import pdb
 
+# [norm0, norm1, norm2, norm3]
+ENCODER_RESULT = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+
 class Block(nn.Module):
     def __init__(self, dim, drop_path=0., layer_scale_init_value=1e-6):
         super().__init__()
@@ -80,7 +83,7 @@ class ConvNeXt(nn.Module):
 
         self.norm = nn.LayerNorm(dims[-1], eps=1e-6) # final norm layer
 
-    def forward(self, x) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x) -> ENCODER_RESULT:
         # tensor [x] size: [1, 3, 512, 512], min: -4.686537, max: 4.506181, mean: -0.000415
 
         # encoder_layers: List[torch.Tensor] = []

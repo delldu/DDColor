@@ -14,12 +14,10 @@ class SelfAttentionLayer(nn.Module):
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-    def with_pos_embed(self, tensor, query_pos: Optional[Tensor] = None):
-        if query_pos is None:
-            return tensor
+    def with_pos_embed(self, tensor, query_pos):
         return tensor + query_pos
 
-    def forward(self, tgt, query_pos: Optional[Tensor] = None):
+    def forward(self, tgt, query_pos):
         q = k = self.with_pos_embed(tgt, query_pos)
         tgt2 = self.self_attn(q, k, value=tgt, attn_mask=None, key_padding_mask=None)[0]
 
@@ -37,15 +35,13 @@ class CrossAttentionLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
 
-    def with_pos_embed(self, tensor, pos: Optional[Tensor] = None):
-        if pos is None:
-            return tensor
+    # def with_pos_embed(self, tensor, pos: Optional[Tensor] = None):
+    def with_pos_embed(self, tensor, pos):
+        # if pos is None:
+        #     return tensor
         return tensor + pos
 
-    def forward(self, tgt, memory,
-                pos: Optional[Tensor] = None,
-                query_pos: Optional[Tensor] = None):
-
+    def forward(self, tgt, memory, pos, query_pos):
         tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory, attn_mask=None,

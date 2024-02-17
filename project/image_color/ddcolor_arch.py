@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .unet import CustomPixelShuffle_ICNR, UnetBlockWide, custom_conv_layer
+from .unet import CustomPixelShuffle, UnetBlockWide, custom_conv_layer
 
 from .convnext import ConvNeXt
 from .transformer_utils import SelfAttentionLayer, CrossAttentionLayer, FFNLayer, MLP
@@ -13,6 +13,9 @@ from typing import List, Tuple
 
 import todos
 import pdb
+
+# [norm0, norm1, norm2, norm3]
+ENCODER_RESULT = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 
 class DDColor(nn.Module):
     def __init__(self,
@@ -73,7 +76,7 @@ class DDColor(nn.Module):
             recompute_scale_factor=False,
             align_corners=False,
         )
-        encoder_layers: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] = self.encoder(x)
+        encoder_layers: ENCODER_RESULT = self.encoder(x)
 
         out_feat = self.decoder(encoder_layers)
         coarse_input = torch.cat([out_feat, x], dim=1)
@@ -95,7 +98,7 @@ class Decoder(nn.Module):
         self.layers = self.make_layers()
         embed_dim = nf // 2
 
-        self.last_shuf = CustomPixelShuffle_ICNR(embed_dim, embed_dim, scale=4)
+        self.last_shuf = CustomPixelShuffle(embed_dim, embed_dim, scale=4)
         
         self.color_decoder = MultiScaleColorDecoder(
             in_channels=[512, 512, 256],
@@ -106,6 +109,8 @@ class Decoder(nn.Module):
 
 
     def make_layers(self):
+        # nn.Sequential only accept one tensor as input
+        # under torch.jit.script, so we replace with ModuleList !!!
         # decoder_layers = []
         # decoder_layers.append(UnetBlockWide(1536, 768, 512))
         # decoder_layers.append(UnetBlockWide(512, 384, 512))
@@ -127,7 +132,7 @@ class Decoder(nn.Module):
         return x
 
 
-    def forward(self, encoder_output_layers: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]):
+    def forward(self, encoder_output_layers: ENCODER_RESULT):
         # print("-" * 120)
         # todos.debug.output_var("encoder_output_layers[0]", encoder_output_layers[0])
         # todos.debug.output_var("encoder_output_layers[1]", encoder_output_layers[1])
@@ -162,7 +167,7 @@ class Encoder(nn.Module):
             raise NotImplementedError
 
 
-    def forward(self, x) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x) -> ENCODER_RESULT:
         return self.arch(x)
     
 
@@ -255,9 +260,7 @@ class MultiScaleColorDecoder(nn.Module):
             pos.append(pos_temp)
             src.append(src_temp)
 
-
-        # pdb.set_trace()
-        _, bs, _ = src[0].shape # [1024, 1, 256]
+        bs = src[0].shape[1] # src[0].shape -- [1024, 1, 256]
 
         # QxNxC
         query_embed = self.query_embed.weight.unsqueeze(1).repeat(1, bs, 1)
@@ -276,8 +279,7 @@ class MultiScaleColorDecoder(nn.Module):
         i = 0
         for (cross_layer, self_layer, ffn_layer) in zip(self.transformer_cross_attention_layers, 
             self.transformer_self_attention_layers,
-            self.transformer_ffn_layers,
-            ):
+            self.transformer_ffn_layers):
 
             level_index = i % self.num_feature_levels # 3
             # attention: cross-attention first

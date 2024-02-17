@@ -98,7 +98,7 @@ def export_onnx_model():
     onnx_filename = "output/image_color.onnx"
 
     torch.onnx.export(model, (dummy_input), onnx_filename, 
-        verbose=True, 
+        verbose=False, 
         input_names=input_names, 
         output_names=output_names,
         # dynamic_axes=dynamic_axes,
