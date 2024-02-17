@@ -44,6 +44,17 @@ class DDColor(nn.Module):
 
         self.load_weights()
 
+        # Remove spectral normal 
+        nn.utils.remove_spectral_norm(self.refine_net[0][0])
+        nn.utils.remove_spectral_norm(self.decoder.layers[0].conv[0])
+        nn.utils.remove_spectral_norm(self.decoder.layers[1].conv[0])
+        nn.utils.remove_spectral_norm(self.decoder.layers[2].conv[0])
+        nn.utils.remove_spectral_norm(self.decoder.layers[0].shuf.conv[0])
+        nn.utils.remove_spectral_norm(self.decoder.layers[1].shuf.conv[0])
+        nn.utils.remove_spectral_norm(self.decoder.layers[2].shuf.conv[0])
+        nn.utils.remove_spectral_norm(self.decoder.last_shuf.conv[0])
+
+
     def load_weights(self, model_path="models/image_color.pth"):
         cdir = os.path.dirname(__file__)
         checkpoint = model_path if cdir == "" else cdir + "/" + model_path
@@ -211,6 +222,12 @@ class MultiScaleColorDecoder(nn.Module):
         self.color_embed = MLP(hidden_dim, hidden_dim, color_embed_dim, 3)
 
     def forward(self, x, img_features):
+        # x is list: len = 3
+        #     tensor [item] size: [1, 512, 32, 32], min: -2.036234, max: 162340.96875, mean: 3001.375
+        #     tensor [item] size: [1, 512, 64, 64], min: -2.632989, max: 835685120.0, mean: 68049544.0
+        #     tensor [item] size: [1, 256, 128, 128], min: -2.94301, max: 1553683709952.0, mean: 143206252544.0
+        # tensor [img_features] size: [1, 256, 512, 512], min: 0.0, max: 222161108992.0, mean: 1800433664.0
+
         # x is a list of multi-scale feature
         assert len(x) == self.num_feature_levels # 3
         src = []
@@ -224,7 +241,8 @@ class MultiScaleColorDecoder(nn.Module):
             pos[-1] = pos[-1].permute(2, 0, 1)
             src[-1] = src[-1].permute(2, 0, 1)    
 
-        _, bs, _ = src[0].shape
+        # pdb.set_trace()
+        _, bs, _ = src[0].shape # [1024, 1, 256]
 
         # QxNxC
         query_embed = self.query_embed.weight.unsqueeze(1).repeat(1, bs, 1)
@@ -243,9 +261,11 @@ class MultiScaleColorDecoder(nn.Module):
             # FFN
             output = self.transformer_ffn_layers[i](output)
 
-        decoder_output = self.decoder_norm(output)
-        decoder_output = decoder_output.transpose(0, 1)  # [N, bs, C]  -> [bs, N, C]
+        # output.size() -- [100, 1, 256]
+        decoder_output = self.decoder_norm(output) # size() -- [100, 1, 256]
+        decoder_output = decoder_output.transpose(0, 1)  # size() -- [1, 100, 256]
+
         color_embed = self.color_embed(decoder_output)
         out = torch.einsum("bqc,bchw->bqhw", color_embed, img_features)
 
-        return out
+        return out # size() -- [1, 100, 512, 512]
