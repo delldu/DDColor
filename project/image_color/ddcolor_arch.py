@@ -30,9 +30,9 @@ class DDColor(nn.Module):
         self.MAX_TIMES = 1
 
         self.encoder = Encoder(encoder_name, ['norm0', 'norm1', 'norm2', 'norm3'])
-        self.encoder.eval()
-        test_input = torch.randn(1, num_input_channels, *input_size)
-        self.encoder(test_input)
+        # self.encoder.eval()
+        # test_input = torch.randn(1, num_input_channels, *input_size)
+        # self.encoder(test_input)
 
         self.decoder = Decoder(
             self.encoder.hooks,
@@ -42,7 +42,8 @@ class DDColor(nn.Module):
             num_scales=num_scales,
             dec_layers=dec_layers,
         )
-        self.refine_net = nn.Sequential(custom_conv_layer(num_queries + 3, num_output_channels, ks=1, 
+        self.refine_net = nn.Sequential(
+            custom_conv_layer(num_queries + 3, num_output_channels, ks=1, 
             use_activ=False, norm_type=NormType.Spectral))
     
         self.register_buffer('mean', torch.Tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
