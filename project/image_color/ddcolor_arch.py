@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .unet import Hook, CustomPixelShuffle_ICNR,  UnetBlockWide, NormType, custom_conv_layer
+from .unet import Hook, CustomPixelShuffle_ICNR,  UnetBlockWide, custom_conv_layer
 from .convnext import ConvNeXt
 from .transformer_utils import SelfAttentionLayer, CrossAttentionLayer, FFNLayer, MLP
 from .position_encoding import PositionEmbeddingSine
@@ -19,7 +19,6 @@ class DDColor(nn.Module):
                  input_size=(512, 512),
                  nf=512,
                  num_output_channels=2,
-                 last_norm='Spectral',
                  num_queries=100,
                  num_scales=3,
                  dec_layers=9,
@@ -37,14 +36,12 @@ class DDColor(nn.Module):
         self.decoder = Decoder(
             self.encoder.hooks,
             nf=nf,
-            last_norm=last_norm,
             num_queries=num_queries,
             num_scales=num_scales,
             dec_layers=dec_layers,
         )
         self.refine_net = nn.Sequential(
-            custom_conv_layer(num_queries + 3, num_output_channels, ks=1, 
-            use_activ=False, norm_type=NormType.Spectral))
+            custom_conv_layer(num_queries + 3, num_output_channels, ks=1, use_activ=False))
     
         self.register_buffer('mean', torch.Tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer('std', torch.Tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
@@ -80,7 +77,7 @@ class Decoder(nn.Module):
     def __init__(self, hooks,
                  nf=512,
                  # blur=True,
-                 last_norm='Spectral',
+                 # last_norm='Spectral',
                  num_queries=100,
                  num_scales=3,
                  dec_layers=9,
@@ -94,20 +91,11 @@ class Decoder(nn.Module):
 
         self.hooks = hooks
         self.nf = nf
-        # self.blur = blur
-        self.last_norm = getattr(NormType, last_norm)
-        # self.last_norm -- <NormType.Spectral: 4>
-
-        # print("self.blur ==== ", self.blur)
-        # if not self.blur:
-        #     pdb.set_trace() 
 
         self.layers = self.make_layers()
         embed_dim = nf // 2
 
-        self.last_shuf = CustomPixelShuffle_ICNR(embed_dim, embed_dim, 
-            # blur=self.blur, 
-            norm_type=self.last_norm, scale=4)
+        self.last_shuf = CustomPixelShuffle_ICNR(embed_dim, embed_dim, scale=4)
         
         self.color_decoder = MultiScaleColorDecoder(
             in_channels=[512, 512, 256],
@@ -156,8 +144,7 @@ class Decoder(nn.Module):
             if layer_index == len(setup_hooks) - 1:
                 out_c = out_c // 2
             print("in_c === ", in_c, ", feature_c === ", feature_c, ", out_c === ", out_c)
-            decoder_layers.append(UnetBlockWide(in_c, feature_c, out_c, hook,  
-                self_attention=False, norm_type=NormType.Spectral))
+            decoder_layers.append(UnetBlockWide(in_c, feature_c, out_c, hook))
             in_c = out_c
 
         # pdb.set_trace()

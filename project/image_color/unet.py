@@ -84,75 +84,22 @@ def custom_conv_layer(
     nf: int,
     ks: int = 3,
     stride: int = 1,
-    padding: int = None,
-    # bias: bool = None,
-    # is_1d: bool = False,
-    norm_type=NormType.Batch,
-    use_activ: bool = True,
-    transpose: bool = False,
-    init=nn.init.kaiming_normal_,
-    self_attention: bool = False,
+    use_activ: bool = True, # True | False
     extra_bn: bool = False, # True || False
 ):
-    # if padding is None:
-    #     padding = (ks - 1) // 2 if not transpose else 0
-    # else:
-    #     pdb.set_trace()
     padding = (ks - 1) // 2
-    # print("custom_conv_layer: extra_bn == ", extra_bn)
-    # print("custom_conv_layer: norm_type in (NormType.Batch, NormType.BatchZero) === ", norm_type in (NormType.Batch, NormType.BatchZero))
-    # bn = norm_type in (NormType.Batch, NormType.BatchZero) or extra_bn == True
-    bn = extra_bn
-    # if bias is None:
-    #     bias = not bn
-    # else:
-    #     pdb.set_trace()
-    bias = not bn
-
-    # print("bn ==== ", bn, "bias ==== ", bias, "transpose ==== ", transpose, "is_1d ==== ", is_1d)
-    # bn ====  True bias ====  False transpose ====  False is_1d ====  False
-    # bn ====  True bias ====  False transpose ====  False is_1d ====  False
-    # bn ====  True bias ====  False transpose ====  False is_1d ====  False
-    # bn ====  True bias ====  False transpose ====  False is_1d ====  False
-    # bn ====  True bias ====  False transpose ====  False is_1d ====  False
-    # bn ====  True bias ====  False transpose ====  False is_1d ====  False
-    # conv_func = nn.ConvTranspose2d if transpose else nn.Conv1d if is_1d else nn.Conv2d
     conv_func = nn.Conv2d
     conv = init_default(
-        conv_func(ni, nf, kernel_size=ks, bias=bias, stride=stride, padding=padding),
-        init,
+        conv_func(ni, nf, kernel_size=ks, bias=not extra_bn, stride=stride, padding=padding),
+        nn.init.kaiming_normal_,
     )
-
-    # conv_func = nn.Conv2d
-    # conv = init_default(
-    #     conv_func(ni, nf, kernel_size=ks, bias=False, stride=stride, padding=padding),
-    #     init,
-    # )
-
-    # if norm_type == NormType.Weight:
-    #     conv = nn.utils.weight_norm(conv)
-    #     pdb.set_trace()
-    # elif norm_type == NormType.Spectral: # True
-    #     conv = nn.utils.spectral_norm(conv)
-    # else:
-    #     pdb.set_trace()
-
     conv = nn.utils.spectral_norm(conv)
     layers = [conv]
+
     if use_activ: # True | False
         layers.append(nn.ReLU(True))
-
-    print("custom_conv_layer: bn ==== ", bn)
-    if bn: # True | False
-        # layers.append((nn.BatchNorm1d if is_1d else nn.BatchNorm2d)(nf))
+    if extra_bn: # True | False
         layers.append(nn.BatchNorm2d(nf))
-    else:
-        pass # pdb.set_trace()
-
-    # print("custom_conv_layer: self_attention ==== ", self_attention)
-    # if self_attention:
-    #     layers.append(SelfAttention(nf))
-    #     pdb.set_trace()
 
     return nn.Sequential(*layers)
 
@@ -162,18 +109,14 @@ class CustomPixelShuffle_ICNR(nn.Module):
                  ni: int,
                  nf: int = None,
                  scale: int = 2, # 2 | 4
-                 norm_type=NormType.Spectral, # ==== NormType.Spectral
                  extra_bn=False): # True | False
         super().__init__()
         # ni = 1536
         # nf = 512
         # scale = 2
-        # norm_type = <NormType.Spectral: 4>
-        if norm_type != NormType.Spectral:
-            pdb.set_trace()
 
         self.conv = custom_conv_layer(
-            ni, nf * (scale**2), ks=1, use_activ=False, norm_type=norm_type, extra_bn=extra_bn)
+            ni, nf * (scale**2), ks=1, use_activ=False, extra_bn=extra_bn)
         # self.conv ----
         # Sequential(
         #   (0): Conv2d(1536, 2048, kernel_size=(1, 1), stride=(1, 1), bias=False)
@@ -202,16 +145,16 @@ class UnetBlockWide(nn.Module):
                  x_in_c: int,
                  n_out: int,
                  hook,
-                 self_attention: bool = False,
-                 norm_type=NormType.Spectral):
+            ):
         super().__init__()
 
         self.hook = hook
         up_out = n_out
-        self.shuf = CustomPixelShuffle_ICNR(up_in_c, up_out, norm_type=norm_type, extra_bn=True)
+        self.shuf = CustomPixelShuffle_ICNR(up_in_c, up_out, extra_bn=True)
         self.bn = batchnorm_2d(x_in_c)
         ni = up_out + x_in_c
-        self.conv = custom_conv_layer(ni, n_out, norm_type=norm_type, self_attention=self_attention, extra_bn=True)
+        self.conv = custom_conv_layer(ni, n_out, extra_bn=True)
+
         self.relu = nn.ReLU()
 
     def forward(self, up_in):
