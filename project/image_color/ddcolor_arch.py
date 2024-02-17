@@ -73,7 +73,7 @@ class DDColor(nn.Module):
             recompute_scale_factor=False,
             align_corners=False,
         )
-        encoder_layers: List[torch.Tensor] = self.encoder(x)
+        encoder_layers: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] = self.encoder(x)
 
         out_feat = self.decoder(encoder_layers)
         coarse_input = torch.cat([out_feat, x], dim=1)
@@ -106,12 +106,17 @@ class Decoder(nn.Module):
 
 
     def make_layers(self):
-        decoder_layers = []
-        decoder_layers.append(UnetBlockWide(1536, 768, 512))
-        decoder_layers.append(UnetBlockWide(512, 384, 512))
-        decoder_layers.append(UnetBlockWide(512, 192, 256))
+        # decoder_layers = []
+        # decoder_layers.append(UnetBlockWide(1536, 768, 512))
+        # decoder_layers.append(UnetBlockWide(512, 384, 512))
+        # decoder_layers.append(UnetBlockWide(512, 192, 256))
+        # return nn.Sequential(*decoder_layers)
 
-        return nn.Sequential(*decoder_layers)
+        m = nn.ModuleList()
+        m.append(UnetBlockWide(1536, 768, 512))
+        m.append(UnetBlockWide(512, 384, 512))
+        m.append(UnetBlockWide(512, 192, 256))
+        return m
         
 
     def layer_output(self, layer_index: int, x, s_x):
@@ -157,7 +162,7 @@ class Encoder(nn.Module):
             raise NotImplementedError
 
 
-    def forward(self, x) -> List[torch.Tensor]:
+    def forward(self, x) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         return self.arch(x)
     
 
