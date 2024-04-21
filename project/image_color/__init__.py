@@ -22,7 +22,7 @@ from . import color_space, ddcolor_arch
 import pdb
 
 
-def get_color_model():
+def get_ddcolor_model():
     """Create model."""
 
     model = ddcolor_arch.DDColor()
@@ -42,8 +42,8 @@ def get_color_model():
     # torch::jit::setTensorExprFuserEnabled(false);
 
     todos.data.mkdir("output")
-    if not os.path.exists("output/image_color.torch"):
-        model.save("output/image_color.torch")
+    if not os.path.exists("output/image_ddcolor.torch"):
+        model.save("output/image_ddcolor.torch")
 
     return model, device
 
@@ -53,7 +53,7 @@ def image_predict(grey_input_files, output_dir):
     todos.data.mkdir(output_dir)
 
     # load model
-    model, device = get_color_model()
+    model, device = get_ddcolor_model()
 
     # load files
     grey_filenames = todos.data.load_files(grey_input_files)
@@ -66,12 +66,22 @@ def image_predict(grey_input_files, output_dir):
         # orig input
         g_input_tensor = todos.data.load_tensor(g_filename)
         B, C, H, W = g_input_tensor.size()
+
         g_lab = color_space.rgb2lab(g_input_tensor)
         g_l = g_lab[:, 0:1, :, :].clone()
         g_lab[:, 1:3, :, :] = 0.0
         g_rgb = color_space.lab2rgb(g_lab)
 
-        out_ab = todos.model.forward(model, device, g_rgb)/128.0
+        ############################################################
+        # model forward
+        g_rgb_512 = F.interpolate(g_input_tensor,
+            size=(512, 512),
+            mode="bilinear",
+            recompute_scale_factor=False,
+            align_corners=False,
+        )
+        out_ab = todos.model.forward(model, device, g_rgb_512)/128.0
+        ############################################################
 
         out_ab = F.interpolate(out_ab,
             size=(H, W),
@@ -87,5 +97,4 @@ def image_predict(grey_input_files, output_dir):
 
         # (Pdb) g_input_tensor.size() -- [1, 3, 678, 1020]
         # (Pdb) predict_tensor.size() -- [1, 3, 678, 1020]
-        # (Pdb) g_rgb.size() -- [1, 3, 512, 512]
         todos.data.save_tensor([g_input_tensor, predict_tensor], output_file)

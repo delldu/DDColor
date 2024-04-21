@@ -23,10 +23,10 @@ def test_input_shape():
 
     print("Test input shape ...")
 
-    model, device = image_color.get_color_model()
+    model, device = image_color.get_ddcolor_model()
 
     N = 100
-    B, C, H, W = 1, 3, model.MAX_H, model.MAX_W
+    B, C, H, W = 1, 3, 512, 512 # model.MAX_H, model.MAX_W, # Fixed number, DO NOT change !!!
 
     mean_time = 0
     progress_bar = tqdm(total=N)
@@ -35,7 +35,9 @@ def test_input_shape():
 
         h = random.randint(-16, 16)
         w = random.randint(-16, 16)
-        x1 = torch.randn(B, C, H + h, W + w)
+        # x1 = torch.randn(B, C, H + h, W + w)
+        x1 = torch.randn(B, C, H, W) # Fixed number, DO NOT change !!!
+
         # print("x: ", x.size())
 
         start_time = time.time()
@@ -52,9 +54,9 @@ def test_input_shape():
 def run_bench_mark():
     print("Run benchmark ...")
 
-    model, device = image_color.get_color_model()
+    model, device = image_color.get_ddcolor_model()
     N = 100
-    B, C, H, W = 1, 3, model.MAX_H, model.MAX_W
+    B, C, H, W = 1, 3, 512, 512 # model.MAX_H, model.MAX_W, # Fixed number, DO NOT change !!!
 
     with torch.profiler.profile(
         activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]
@@ -79,10 +81,14 @@ def export_onnx_model():
     print("Export onnx model ...")
 
     # 1. Run torch model
-    model, device = image_color.get_color_model()
+    model, device = image_color.get_ddcolor_model()
+    # Force running on cpu
+    device = torch.device("cpu")
+    model.to(device)
+    print(f"Force change running device to {device} ...")
 
-    B, C, H, W = 1, 3, 512, 512
-    dummy_input = torch.randn(B, C, H, W).to(device).clamp(0.0, 1.0)
+    B, C, H, W = 1, 3, 512, 512 # Fixed number, DO NOT change !!!
+    dummy_input = torch.randn(B, C, H, W).to(device)
 
     with torch.no_grad():
         dummy_output = model(dummy_input)
@@ -91,7 +97,7 @@ def export_onnx_model():
     # 2. Export onnx model
     input_names = [ "input"]
     output_names = [ "output" ]
-    onnx_filename = "output/image_color.onnx"
+    onnx_filename = "output/image_ddcolor.onnx"
 
     torch.onnx.export(model, (dummy_input), onnx_filename, 
         verbose=False, 
@@ -103,9 +109,10 @@ def export_onnx_model():
     onnx_model = onnx.load(onnx_filename)
     onnx.checker.check_model(onnx_model)
 
+    # TypeError: arr must be of type np.generic or np.ndarray, got <class 'list'>
     # onnx_model, check = simplify(onnx_model)
     # assert check, "Simplified ONNX model could not be validated"
-    onnx_model = onnxoptimizer.optimize(onnx_model)    
+    onnx_model = onnxoptimizer.optimize(onnx_model)
     onnx.save(onnx_model, onnx_filename)
     # print(onnx.helper.printable_graph(onnx_model.graph))
 
@@ -129,6 +136,16 @@ def export_onnx_model():
     print("!!!!!! Torch and ONNX Runtime output matched !!!!!!")
 
 
+def export_q_onnx_model():
+    import onnx
+    from onnxruntime.quantization import quantize_dynamic, QuantType
+    print("Quantization onnx model ...")
+
+    model_fp32 = 'output/image_ddcolor.onnx'
+    model_quant = 'output/image_qcolor.onnx'
+    quantized_model = quantize_dynamic(model_fp32, model_quant, weight_type=QuantType.QUInt8)
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Smoke Test')
@@ -144,6 +161,7 @@ if __name__ == "__main__":
         run_bench_mark()
     if args.export_onnx:
         export_onnx_model() # OK on CPU, NOK on CUDA
+        # export_q_onnx_model()
     
     if not (args.shape_test or args.bench_mark or args.export_onnx):
         parser.print_help()

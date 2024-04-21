@@ -27,9 +27,10 @@ class DDColor(nn.Module):
                  dec_layers=9,
                 ):
         super().__init__()
-        self.MAX_H = 512
-        self.MAX_W = 512
+        self.MAX_H = 512 # Fixed, DO NOT change !!!
+        self.MAX_W = 512 # Fixed, DO NOT change !!!
         self.MAX_TIMES = 1
+        # GPU - 3G, 100ms, CPU -- 1300ms
 
         self.encoder = Encoder('convnext-l')
 
@@ -54,10 +55,6 @@ class DDColor(nn.Module):
             nn.utils.remove_spectral_norm(self.decoder.layers[i].shuf.conv[0])
         nn.utils.remove_spectral_norm(self.decoder.last_shuf.conv[0])
 
-        # pdb.set_trace()
-        # torch.jit.script(self.encoder)
-        # torch.jit.script(self.decoder)
-        # torch.jit.script(self.refine_net)
 
     def load_weights(self, model_path="models/image_color.pth"):
         cdir = os.path.dirname(__file__)
@@ -68,21 +65,17 @@ class DDColor(nn.Module):
         return (img - self.mean) / self.std
 
     def forward(self, x):
+        assert x.size(2) == 512 and x.size(3) == 512, "Please input 1x3x512x512 tensor"
         x = self.normalize(x)
         
-        x = F.interpolate(x,
-            size=(512, 512),
-            mode="bilinear",
-            recompute_scale_factor=False,
-            align_corners=False,
-        )
+        # How Avoiding Pitfalls in onnx exporting ??? !!!
         encoder_layers: ENCODER_RESULT = self.encoder(x)
 
         out_feat = self.decoder(encoder_layers)
         coarse_input = torch.cat([out_feat, x], dim=1)
-        out = self.refine_net(coarse_input)
+        out_ab = self.refine_net(coarse_input)
 
-        return out.float()
+        return out_ab
 
 
 class Decoder(nn.Module):
@@ -93,7 +86,7 @@ class Decoder(nn.Module):
                 dec_layers=9,
             ):
         super().__init__()
-        self.nf = nf
+        # self.nf = nf
 
         self.layers = self.make_layers()
         embed_dim = nf // 2
@@ -244,7 +237,6 @@ class MultiScaleColorDecoder(nn.Module):
 
         src = []
         pos = []
-
         # for i in range(self.num_feature_levels): # 3
         #     pos_temp = self.pe_layer(x[i]).flatten(2).permute(2, 0, 1)
         #     # self.level_embed.weight.size() -- [3, 256]
@@ -277,7 +269,8 @@ class MultiScaleColorDecoder(nn.Module):
         #     # FFN
         #     output = self.transformer_ffn_layers[i](output)
         i = 0
-        for (cross_layer, self_layer, ffn_layer) in zip(self.transformer_cross_attention_layers, 
+        for (cross_layer, self_layer, ffn_layer) in zip(
+            self.transformer_cross_attention_layers, 
             self.transformer_self_attention_layers,
             self.transformer_ffn_layers):
 

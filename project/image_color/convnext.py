@@ -18,7 +18,7 @@ import pdb
 ENCODER_RESULT = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 
 class Block(nn.Module):
-    def __init__(self, dim, drop_path=0., layer_scale_init_value=1e-6):
+    def __init__(self, dim, layer_scale_init_value=1e-6):
         super().__init__()
         self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim) # depthwise conv
         self.norm = LayerNormChannelsLast(dim, eps=1e-6)
@@ -69,7 +69,7 @@ class ConvNeXt(nn.Module):
         cur = 0
         for i in range(4):
             stage = nn.Sequential(
-                *[Block(dim=dims[i], drop_path=dp_rates[cur + j]) for j in range(depths[i])]
+                *[Block(dim=dims[i]) for j in range(depths[i])]
             )
             self.stages.append(stage)
             cur += depths[i]
@@ -102,7 +102,7 @@ class ConvNeXt(nn.Module):
                 x2 = self.norm2(x)
             elif i == 3:
                 x3 = self.norm3(x)
-            i += 1
+            i = i + 1 # avoid += for onnx export
 
         return (x0, x1, x2, x3)
 

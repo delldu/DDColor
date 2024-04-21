@@ -1,6 +1,6 @@
 import math
 import torch
-from torch import nn, Tensor
+from torch import nn
 from torch.nn import functional as F
 
 from typing import List
@@ -29,9 +29,7 @@ def multi_head_attention_forward(query, key, value, num_heads: int,
     head_dim = embed_dim // num_heads
 
     q, k, v = in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
-
-    q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
-    #  pp q.size() -- [8, 256, 64]
+    q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1) # size() -- [8, 256, 64]
 
     k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
@@ -49,33 +47,9 @@ def multi_head_attention_forward(query, key, value, num_heads: int,
 
     return attn_output
 
-# class Linear(nn.Module):
-#     def __init__(self, in_features: int, out_features: int, bias: bool = True):
-#         super().__init__()
-#         # in_features = 512
-#         # out_features = 512
-#         # bias = True
-
-#         self.in_features = in_features
-#         self.out_features = out_features
-#         self.weight = nn.Parameter(torch.zeros((out_features, in_features)))
-#         self.bias = nn.Parameter(torch.zeros(out_features))
-
-
-#     def forward(self, input):
-#         return F.linear(input, self.weight, self.bias)
-
-#     def extra_repr(self) -> str:
-#         return 'in_features={}, out_features={}, bias={}'.format(
-#             self.in_features, self.out_features, self.bias is not None
-#         )
-
 class MultiheadAttention(nn.Module):
     def __init__(self, embed_dim, num_heads, bias=True, dropout=0.0):
         super().__init__()
-        # embed_dim = 512
-        # num_heads = 8
-
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
         self.in_proj_weight = nn.Parameter(torch.zeros((3 * embed_dim, embed_dim)))
@@ -104,17 +78,18 @@ class SelfAttentionLayer(nn.Module):
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
 
         self.norm = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
+        # self.dropout = nn.Dropout(dropout)
 
     def with_pos_embed(self, tensor, query_pos):
         return tensor + query_pos
 
     def forward(self, tgt, query_pos):
         q = k = self.with_pos_embed(tgt, query_pos)
-        # tgt2 = self.self_attn(q, k, value=tgt, attn_mask=None, key_padding_mask=None)[0]
         tgt2 = self.self_attn(q, k, value=tgt)
 
-        tgt = tgt + self.dropout(tgt2)
+        # tgt = tgt + self.dropout(tgt2)
+        tgt = tgt + tgt2
+
         tgt = self.norm(tgt)
 
         return tgt
@@ -122,25 +97,22 @@ class SelfAttentionLayer(nn.Module):
 class CrossAttentionLayer(nn.Module):
     def __init__(self, d_model, nhead, dropout=0.0):
         super().__init__()
+        # nn.MultiheadAttention has error on ONNX export, so we replace it
         # self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
         self.norm = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
-
+        # self.dropout = nn.Dropout(dropout)
 
     def with_pos_embed(self, tensor, pos):
         return tensor + pos
 
     def forward(self, tgt, memory, pos, query_pos):
-        # tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
-        #                            key=self.with_pos_embed(memory, pos),
-        #                            value=memory, attn_mask=None,
-        #                            key_padding_mask=None)
         tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory)
 
-        tgt = tgt + self.dropout(tgt2)
+        # tgt = tgt + self.dropout(tgt2)
+        tgt = tgt + tgt2
         tgt = self.norm(tgt)
         
         return tgt
@@ -151,7 +123,7 @@ class FFNLayer(nn.Module):
         super().__init__()
         # Implementation of Feedforward model
         self.linear1 = nn.Linear(d_model, dim_feedforward)
-        self.dropout = nn.Dropout(dropout)
+        # self.dropout = nn.Dropout(dropout)
         self.linear2 = nn.Linear(dim_feedforward, d_model)
 
         self.norm = nn.LayerNorm(d_model)
@@ -160,8 +132,11 @@ class FFNLayer(nn.Module):
         return tensor + pos
 
     def forward(self, tgt):
-        tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt))))
-        tgt = tgt + self.dropout(tgt2)
+        # tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt))))
+        # tgt = tgt + self.dropout(tgt2)
+        tgt2 = self.linear2(F.relu(self.linear1(tgt)))
+        tgt = tgt + tgt2
+
         tgt = self.norm(tgt)
         return tgt
 

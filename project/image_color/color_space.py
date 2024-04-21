@@ -15,7 +15,6 @@ import pdb
 
 # Color space Lab
 
-
 def rgb2xyz(rgb):  # rgb from [0,1]
     # [0.412453, 0.357580, 0.180423],
     # [0.212671, 0.715160, 0.072169],
