@@ -75,7 +75,7 @@ def run_bench_mark():
 def export_onnx_model():
     import onnx
     import onnxruntime
-    # from onnxsim import simplify
+    from onnxsim import simplify
     import onnxoptimizer
 
     print("Export onnx model ...")
@@ -109,9 +109,11 @@ def export_onnx_model():
     onnx_model = onnx.load(onnx_filename)
     onnx.checker.check_model(onnx_model)
 
+    pdb.set_trace()
+
     # TypeError: arr must be of type np.generic or np.ndarray, got <class 'list'>
-    # onnx_model, check = simplify(onnx_model)
-    # assert check, "Simplified ONNX model could not be validated"
+    onnx_model, check = simplify(onnx_model)
+    assert check, "Simplified ONNX model could not be validated"
     onnx_model = onnxoptimizer.optimize(onnx_model)
     onnx.save(onnx_model, onnx_filename)
     # print(onnx.helper.printable_graph(onnx_model.graph))
@@ -139,11 +141,18 @@ def export_onnx_model():
 def export_q_onnx_model():
     import onnx
     from onnxruntime.quantization import quantize_dynamic, QuantType
+    from onnxmltools.utils import float16_converter
+
     print("Quantization onnx model ...")
 
-    model_fp32 = 'output/image_ddcolor.onnx'
-    model_quant = 'output/image_qcolor.onnx'
-    quantized_model = quantize_dynamic(model_fp32, model_quant, weight_type=QuantType.QUInt8)
+    model_fp32_filename = 'output/image_ddcolor.onnx'
+    # model_quant = 'output/image_qcolor.onnx'
+    model_fp16_filename = 'output/image_ddcolor_fp16.onnx'
+
+    # quantized_model = quantize_dynamic(model_fp32_filename, model_quant, weight_type=QuantType.QUInt8)
+    onnx_model = onnx.load(model_fp32_filename)
+    trans_model = float16_converter.convert_float_to_float16(onnx_model, keep_io_types=True)
+    onnx.save(trans_model, model_fp16_filename)
 
 
 
@@ -151,9 +160,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Smoke Test')
     parser.add_argument('-s', '--shape_test', action="store_true", help="test shape")
     parser.add_argument('-b', '--bench_mark', action="store_true", help="test benchmark")
-    parser.add_argument('-e', '--export_onnx', action="store_true", help="txport onnx model")
-    args = parser.parse_args()
+    parser.add_argument('-e', '--export_onnx', action="store_true", help="export onnx model")
+    parser.add_argument('-q', '--quant_onnx', action="store_true", help="quant onnx model")
 
+    args = parser.parse_args()
 
     if args.shape_test:
         test_input_shape()
@@ -161,7 +171,8 @@ if __name__ == "__main__":
         run_bench_mark()
     if args.export_onnx:
         export_onnx_model() # OK on CPU, NOK on CUDA
-        # export_q_onnx_model()
+    if args.quant_onnx:
+        export_q_onnx_model()
     
-    if not (args.shape_test or args.bench_mark or args.export_onnx):
+    if not (args.shape_test or args.bench_mark or args.export_onnx or args.quant_onnx):
         parser.print_help()

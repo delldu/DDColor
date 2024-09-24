@@ -29,21 +29,23 @@ def get_ddcolor_model():
     device = todos.model.get_device()
     model = model.to(device)
     model.eval()
+
     if 'cpu' in str(device.type):
         model.float()
 
-    print(f"Running on {device} ...")
-    # make sure model good for C/C++
-    model = torch.jit.script(model)
-    # https://github.com/pytorch/pytorch/issues/52286
-    torch._C._jit_set_profiling_executor(False)
-    # C++ Reference
-    # torch::jit::getProfilingMode() = false;
-    # torch::jit::setTensorExprFuserEnabled(false);
+    # print(f"Running on {device} ...")
+    # # make sure model good for C/C++
+    # model = torch.jit.script(model)
+    # # https://github.com/pytorch/pytorch/issues/52286
+    # torch._C._jit_set_profiling_executor(False)
+    # # C++ Reference
+    # # torch::jit::getProfilingMode() = false;
+    # # torch::jit::setTensorExprFuserEnabled(false);
 
-    todos.data.mkdir("output")
-    if not os.path.exists("output/image_ddcolor.torch"):
-        model.save("output/image_ddcolor.torch")
+    # todos.data.mkdir("output")
+    # if not os.path.exists("output/image_ddcolor.torch"):
+    #     model.save("output/image_ddcolor.torch")
+    # torch.save(model.state_dict(), "/tmp/image_ddcolor.pth")
 
     return model, device
 
@@ -80,7 +82,12 @@ def image_predict(grey_input_files, output_dir):
             recompute_scale_factor=False,
             align_corners=False,
         )
-        out_ab = todos.model.forward(model, device, g_rgb_512)/128.0
+
+        # model = model.half()
+        # g_rgb_512 = g_rgb_512.half()
+        out_ab = todos.model.forward(model, device, g_rgb_512)
+        # out_ab = out_ab.float()
+        out_ab = out_ab/128.0
         ############################################################
 
         out_ab = F.interpolate(out_ab,

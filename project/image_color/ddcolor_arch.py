@@ -13,6 +13,7 @@ from typing import List, Tuple
 
 import todos
 import pdb
+from ggml_engine import create_network
 
 # [norm0, norm1, norm2, norm3]
 ENCODER_RESULT = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
@@ -42,7 +43,13 @@ class DDColor(nn.Module):
         )
         self.refine_net = nn.Sequential(
             custom_conv_layer(num_queries + 3, num_output_channels, ks=1, use_activ=False))
-    
+        # (Pdb) self.refine_net
+        # Sequential(
+        #   (0): Sequential(
+        #     (0): Conv2d(103, 2, kernel_size=(1, 1), stride=(1, 1))
+        #   )
+        # )
+
         self.register_buffer('mean', torch.Tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer('std', torch.Tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
@@ -55,25 +62,33 @@ class DDColor(nn.Module):
             nn.utils.remove_spectral_norm(self.decoder.layers[i].shuf.conv[0])
         nn.utils.remove_spectral_norm(self.decoder.last_shuf.conv[0])
 
-
     def load_weights(self, model_path="models/image_color.pth"):
         cdir = os.path.dirname(__file__)
         checkpoint = model_path if cdir == "" else cdir + "/" + model_path
         self.load_state_dict(torch.load(checkpoint))
 
     def normalize(self, img):
-        return (img - self.mean) / self.std
+        return (img - self.mean) / self.std # ggml_debug
 
     def forward(self, x):
         assert x.size(2) == 512 and x.size(3) == 512, "Please input 1x3x512x512 tensor"
         x = self.normalize(x)
+        # tensor [x] size: [1, 3, 512, 512], min: -2.117904, max: 2.326308, mean: -0.356781
         
         # How Avoiding Pitfalls in onnx exporting ??? !!!
         encoder_layers: ENCODER_RESULT = self.encoder(x)
+        # encoder_layers is tuple: len = 4
+        #     tensor [item] size: [1, 192, 128, 128], min: -10.815851, max: 5.158478, mean: -0.007829
+        #     tensor [item] size: [1, 384, 64, 64], min: -13.253959, max: 16.581171, mean: -0.000148
+        #     tensor [item] size: [1, 768, 32, 32], min: -6.887635, max: 24.325577, mean: 0.001135
+        #     tensor [item] size: [1, 1536, 16, 16], min: -26.544884, max: 16.26297, mean: -0.00155
 
         out_feat = self.decoder(encoder_layers)
         coarse_input = torch.cat([out_feat, x], dim=1)
         out_ab = self.refine_net(coarse_input)
+        # tensor [out_feat] size: [1, 100, 512, 512], min: -14.656635, max: 24.051313, mean: 1.814844
+        # tensor [coarse_input] size: [1, 103, 512, 512], min: -14.656635, max: 24.051313, mean: 1.751593
+        # tensor [out_ab] size: [1, 2, 512, 512], min: -41.829132, max: 52.045349, mean: 4.471401
 
         return out_ab
 
@@ -86,13 +101,20 @@ class Decoder(nn.Module):
                 dec_layers=9,
             ):
         super().__init__()
-        # self.nf = nf
-
         self.layers = self.make_layers()
-        embed_dim = nf // 2
+        embed_dim = nf // 2 # --> 256
 
         self.last_shuf = CustomPixelShuffle(embed_dim, embed_dim, scale=4)
-        
+        # (Pdb) self.last_shuf
+        # CustomPixelShuffle(
+        #   (conv): Sequential(
+        #     (0): Conv2d(256, 4096, kernel_size=(1, 1), stride=(1, 1))
+        #   )
+        #   (shuf): PixelShuffle(upscale_factor=4)
+        #   (pad): ReplicationPad2d((1, 0, 1, 0))
+        #   (blur): AvgPool2d(kernel_size=2, stride=1, padding=0)
+        #   (relu): ReLU(inplace=True)
+        # )
         self.color_decoder = MultiScaleColorDecoder(
             in_channels=[512, 512, 256],
             num_queries=num_queries, # 100
@@ -100,10 +122,10 @@ class Decoder(nn.Module):
             dec_layers=dec_layers, # 9
         )
 
-
     def make_layers(self):
         # nn.Sequential only accept one tensor as input
         # under torch.jit.script, so we replace with ModuleList !!!
+
         # decoder_layers = []
         # decoder_layers.append(UnetBlockWide(1536, 768, 512))
         # decoder_layers.append(UnetBlockWide(512, 384, 512))
@@ -126,28 +148,34 @@ class Decoder(nn.Module):
 
 
     def forward(self, encoder_output_layers: ENCODER_RESULT):
-        # print("-" * 120)
-        # todos.debug.output_var("encoder_output_layers[0]", encoder_output_layers[0])
-        # todos.debug.output_var("encoder_output_layers[1]", encoder_output_layers[1])
-        # todos.debug.output_var("encoder_output_layers[2]", encoder_output_layers[2])
-        # todos.debug.output_var("encoder_output_layers[3]", encoder_output_layers[3])
-        # print("-" * 120)
+        # encoder_output_layers is tuple: len = 4
+        #     tensor [item] size: [1, 192, 128, 128], min: -10.815851, max: 5.158478, mean: -0.007829
+        #     tensor [item] size: [1, 384, 64, 64], min: -13.253959, max: 16.581171, mean: -0.000148
+        #     tensor [item] size: [1, 768, 32, 32], min: -6.887635, max: 24.325577, mean: 0.001135
+        #     tensor [item] size: [1, 1536, 16, 16], min: -26.544884, max: 16.26297, mean: -0.00155
+
         (x0, x1, x2, x3) = encoder_output_layers
         out0 = self.layer_output(0, x3, x2)
+        # tensor [out0] size: [1, 512, 32, 32], min: -2.069555, max: 33.400291, mean: -0.006212
+
         out1 = self.layer_output(1, out0, x1)
+        # tensor [out1] size: [1, 512, 64, 64], min: -2.505532, max: 12.87324, mean: -0.048077
+
         out2 = self.layer_output(2, out1, x0)
+        # tensor [out2] size: [1, 256, 128, 128], min: -2.547425, max: 12.310425, mean: -0.095538
 
         out3 = self.last_shuf(out2) 
+        # tensor [out3] size: [1, 256, 512, 512], min: 0.0, max: 0.285963, mean: 0.009585
 
         out = self.color_decoder([out0, out1, out2], out3)
+        # tensor [out] size: [1, 100, 512, 512], min: -14.656635, max: 24.051313, mean: 1.814844
+
         return out
 
 
 class Encoder(nn.Module):
-
     def __init__(self, encoder_name):
         super().__init__()
- 
         if encoder_name == 'convnext-t' or encoder_name == 'convnext':
             self.arch = ConvNeXt()
         elif encoder_name == 'convnext-s':
@@ -158,7 +186,6 @@ class Encoder(nn.Module):
             self.arch = ConvNeXt(depths=[3, 3, 27, 3], dims=[192, 384, 768, 1536])
         else:
             raise NotImplementedError
-
 
     def forward(self, x) -> ENCODER_RESULT:
         return self.arch(x)
@@ -188,30 +215,33 @@ class MultiScaleColorDecoder(nn.Module):
         for _ in range(self.dec_layers): # 9
             self.transformer_self_attention_layers.append(
                 SelfAttentionLayer(
-                    d_model=hidden_dim,
-                    nhead=nheads,
+                    d_model=hidden_dim, # 256
+                    nhead=nheads, # 8
                     dropout=0.0,
                 )
             )
             self.transformer_cross_attention_layers.append(
                 CrossAttentionLayer(
-                    d_model=hidden_dim,
-                    nhead=nheads,
+                    d_model=hidden_dim, # 256
+                    nhead=nheads, # 8
                     dropout=0.0,
                 )
             )
             self.transformer_ffn_layers.append(
                 FFNLayer(
-                    d_model=hidden_dim,
-                    dim_feedforward=dim_feedforward,
+                    d_model=hidden_dim, # 256
+                    dim_feedforward=dim_feedforward, # 2048
                     dropout=0.0,
                 )
             )
         
-        self.decoder_norm = nn.LayerNorm(hidden_dim)
+        self.decoder_norm = nn.LayerNorm(hidden_dim) # hidden_dim === 256
+        # (Pdb) self.decoder_norm -- LayerNorm((256,), eps=1e-05, elementwise_affine=True)
 
         # learnable color query features
         self.query_feat = nn.Embedding(num_queries, hidden_dim)
+        # self.query_feat -- Embedding(100, 256)
+
         # learnable color query p.e.
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
 
@@ -223,10 +253,20 @@ class MultiScaleColorDecoder(nn.Module):
         self.input_proj = nn.ModuleList()
         for i in range(self.num_feature_levels): # 3
             self.input_proj.append(nn.Conv2d(in_channels[i], hidden_dim, kernel_size=1))
+        # (Pdb) self.input_proj
+        # ModuleList(
+        #   (0-1): 2 x Conv2d(512, 256, kernel_size=(1, 1), stride=(1, 1))
+        #   (2): Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1))
+        # )
 
         # output FFNs
-        self.color_embed = MLP(hidden_dim, hidden_dim, color_embed_dim, 3)
-
+        self.color_embed = MLP(hidden_dim, hidden_dim, color_embed_dim, 3) # input_dim, hidden_dim, output_dim, num_layers
+        # (Pdb) self.color_embed
+        # MLP(
+        #   (layers): ModuleList(
+        #     (0-2): 3 x Linear(in_features=256, out_features=256, bias=True)
+        #   )
+        # )
 
     def forward(self, x: List[torch.Tensor], img_features):
         # x is list: len = 3
@@ -245,19 +285,23 @@ class MultiScaleColorDecoder(nn.Module):
         #     pos.append(pos_temp)
         #     src.append(src_temp)
         for i, layer in enumerate(self.input_proj):
-            pos_temp = self.pe_layer(x[i]).flatten(2).permute(2, 0, 1)
+            # x[0].size() -- [1, 512, 32, 32]
+            # self.pe_layer(x[0]).size() -- [1, 256, 32, 32]
+            # self.pe_layer(x[0]).flatten(2).size() -- [1, 256, 1024]
+            pos_temp = self.pe_layer(x[i]).flatten(2).permute(2, 0, 1) # [1024, 1, 256]
+
             # self.level_embed.weight.size() -- [3, 256]
             src_temp = layer(x[i]).flatten(2) + self.level_embed.weight[i][None, :, None]
             src_temp = src_temp.permute(2, 0, 1)
+
             pos.append(pos_temp)
             src.append(src_temp)
 
         bs = src[0].shape[1] # src[0].shape -- [1024, 1, 256]
 
         # QxNxC
-        query_embed = self.query_embed.weight.unsqueeze(1).repeat(1, bs, 1)
-        output = self.query_feat.weight.unsqueeze(1).repeat(1, bs, 1)
-
+        query_embed = self.query_embed.weight.unsqueeze(1).repeat(1, bs, 1) # [100, 1024, 256]
+        output = self.query_feat.weight.unsqueeze(1).repeat(1, bs, 1) # [100, 1024, 256]
         # for i in range(self.dec_layers): # 9
         #     level_index = i % self.num_feature_levels # 3
         #     # attention: cross-attention first
@@ -285,8 +329,11 @@ class MultiScaleColorDecoder(nn.Module):
         # output.size() -- [100, 1, 256]
         decoder_output = self.decoder_norm(output) # size() -- [100, 1, 256]
         decoder_output = decoder_output.transpose(0, 1)  # size() -- [1, 100, 256]
-
         color_embed = self.color_embed(decoder_output)
-        out = torch.einsum("bqc,bchw->bqhw", color_embed, img_features)
+        out = torch.einsum("bqc,bchw->bqhw", color_embed, img_features) # ggml_debug
+
+        # tensor [color_embed] size: [1, 100, 256], min: -32.289177, max: 50.403393, mean: 0.213315
+        # tensor [img_features] size: [1, 256, 512, 512], min: 0.0, max: 0.285963, mean: 0.009585
+        # tensor [out] size: [1, 100, 512, 512], min: -14.656635, max: 24.051313, mean: 1.814844
 
         return out # size() -- [1, 100, 512, 512]
