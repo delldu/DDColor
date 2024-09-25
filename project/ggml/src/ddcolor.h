@@ -5,49 +5,114 @@
 
 #pragma GCC diagnostic ignored "-Wformat-truncation"
 
-struct MLP {
-    // int num_layers = 3;
+// def custom_conv_layer(ni, nf,
+//     ks = 3,
+//     stride = 1,
+//     use_activ = True, # True | False
+//     extra_bn = False, # True || False
+// ):
+//     padding = (ks - 1) // 2
+//     conv = nn.Conv2d(ni, nf, kernel_size=ks, bias=not extra_bn, stride=stride, padding=padding)
+//     conv = nn.utils.spectral_norm(conv)
+//     layers = [conv]
 
-    // network params
-    struct Linear layers_0;
-    struct Linear layers_1;
-    struct Linear layers_2;
+//     if use_activ: # True | False
+//         layers.append(nn.ReLU(True))
+//     if extra_bn: # True | False
+//         layers.append(nn.BatchNorm2d(nf))
+
+//     return nn.Sequential(*layers)
+
+struct CustomConv2d {
+    int ni;
+    int nf;
+    int ks = 3;
+    bool use_activ = true; // Fixed default ...
+    bool extra_bn = false; // Fixed default ...
+
+    struct Conv2d conv;
+    struct BatchNorm2d bn;
 
     void create_weight_tensors(ggml_context_t* ctx) {
-        layers_0.in_features = 256;
-        layers_0.out_features = 256;
-        layers_0.create_weight_tensors(ctx, GGML_TYPE_F32);
+        conv.in_channels = ni;
+        conv.out_channels = nf;
+        conv.kernel_size = {ks, ks};
+        // conv.stride = { 1, 1 };
+        conv.padding = { (ks - 1)/2, (ks - 1)/2 };
+        // conv.dilation = { 1, 1 };
+        // conv.is_depthwise = false;
+        conv.has_bias = extra_bn ? false: true;
+        conv.create_weight_tensors(ctx, GGML_TYPE_F32);
 
-        layers_1.in_features = 256;
-        layers_1.out_features = 256;
-        layers_1.create_weight_tensors(ctx, GGML_TYPE_F32);
+        if (extra_bn) {
+            bn.num_features = nf;
+            bn.create_weight_tensors(ctx);
+        }
+    }
 
-        layers_2.in_features = 256;
-        layers_2.out_features = 256;
-        layers_2.create_weight_tensors(ctx, GGML_TYPE_F32);
+    // (conv): Sequential(
+    //   (0): Conv2d(448, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    //   (1): ReLU(inplace=True)
+    //   (2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    // )
+    void setup_weight_names(const char *prefix) {
+        char s[GGML_MAX_NAME];
+
+        snprintf(s, sizeof(s), "%s%s", prefix, "0.");
+        conv.setup_weight_names(s);
+
+        if (extra_bn) {
+            if (use_activ) {
+                snprintf(s, sizeof(s), "%s%s", prefix, "2."); // Add ReLU ...
+            } else {
+                snprintf(s, sizeof(s), "%s%s", prefix, "1.");
+            }
+            bn.setup_weight_names(s);
+        }
+    }
+
+    ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x) {
+        x = conv.forward(ctx, x);
+        if (use_activ) {
+            x = ggml_relu_inplace(ctx, x);
+        }
+
+        if (extra_bn) {
+            x = bn.forward(ctx, x);
+        }
+        return x;
+    }
+};
+
+
+struct MLP {
+    // int num_layers = 3;
+    struct Linear layers[3];
+
+    void create_weight_tensors(ggml_context_t* ctx) {
+        for (int i = 0; i < 3; i++) {
+            layers[i].in_features = 256;
+            layers[i].out_features = 256;
+            layers[i].create_weight_tensors(ctx, GGML_TYPE_F32);
+        }
     }
 
     void setup_weight_names(const char *prefix) {
         char s[GGML_MAX_NAME];
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "layers.0.");
-        layers_0.setup_weight_names(s);
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "layers.1.");
-        layers_1.setup_weight_names(s);
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "layers.2.");
-        layers_2.setup_weight_names(s);
+        for (int i = 0; i < 3; i++) {
+            snprintf(s, sizeof(s), "%slayers.%d.", prefix, i);
+            layers[i].setup_weight_names(s);
+        }
     }
 
     ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x) {
-        x = layers_0.forward(ctx, x);
+        x = layers[0].forward(ctx, x);
         x = ggml_relu_inplace(ctx, x);
 
-        x = layers_1.forward(ctx, x);
+        x = layers[1].forward(ctx, x);
         x = ggml_relu_inplace(ctx, x);
 
-        x = layers_2.forward(ctx, x);
+        x = layers[2].forward(ctx, x);
 
     	return x;
     }
@@ -109,8 +174,8 @@ struct MultiheadAttention {
     struct Linear out_proj;
 
     void create_weight_tensors(ggml_context_t* ctx) {
-        in_proj.in_features = 3 * embed_dim;
-        in_proj.out_features = embed_dim;
+        in_proj.in_features = embed_dim;
+        in_proj.out_features = 3 * embed_dim;
         in_proj.create_weight_tensors(ctx, GGML_TYPE_F32);
 
         out_proj.in_features = embed_dim;
@@ -121,7 +186,7 @@ struct MultiheadAttention {
     void setup_weight_names(const char *prefix) {
         char s[GGML_MAX_NAME];
 
-        snprintf(s, sizeof(s), "%s%s", prefix, "in_proj.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "in_proj_");
         in_proj.setup_weight_names(s);
 
         snprintf(s, sizeof(s), "%s%s", prefix, "out_proj.");
@@ -385,22 +450,17 @@ struct CustomPixelShuffle {
     int scale = 2;
     bool extra_bn = false;
     
-    struct Conv2d conv_0;
-    struct BatchNorm2d conv_1;
+    struct CustomConv2d conv;
     struct PixelShuffle shuf;
 
     void create_weight_tensors(ggml_context_t* ctx) {
-        conv_0.in_channels = ni;
-        conv_0.out_channels = nf * (scale*scale);
-
-        conv_0.kernel_size = {1, 1};
-        conv_0.create_weight_tensors(ctx, GGML_TYPE_F32);
-
-        if (extra_bn) { // BatchNorm2d
-            conv_1.num_features = nf * (scale*scale);
-            conv_1.eps = 1e-5;
-            conv_1.create_weight_tensors(ctx);
-        }
+        // self.conv = custom_conv_layer(ni, nf * (scale**2), ks=1, use_activ=False, extra_bn=extra_bn)
+        conv.ni = ni;
+        conv.nf = nf * (scale * scale);
+        conv.ks = 1;
+        conv.use_activ = false;
+        conv.extra_bn = extra_bn;
+        conv.create_weight_tensors(ctx);
 
         shuf.upscale_factor = scale;
         shuf.create_weight_tensors(ctx);
@@ -409,15 +469,11 @@ struct CustomPixelShuffle {
     void setup_weight_names(const char *prefix) {
         char s[GGML_MAX_NAME];
 
-        snprintf(s, sizeof(s), "%s%s", prefix, "conv.0.");
-        conv_0.setup_weight_names(s);
+        snprintf(s, sizeof(s), "%s%s", prefix, "conv.");
+        conv.setup_weight_names(s);
 
-        if (extra_bn) {
-            snprintf(s, sizeof(s), "%s%s", prefix, "conv.1.");
-            conv_1.setup_weight_names(s);
-        }
-
-        // shuf has not weight data ...
+        snprintf(s, sizeof(s), "%s%s", prefix, "shuf.");
+        shuf.setup_weight_names(s);
     }
 
     ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x) {
@@ -458,35 +514,7 @@ struct UnetBlockWide {
     // shuf
     struct CustomPixelShuffle shuf;
     struct BatchNorm2d bn;
-
-
-        // self.bn = nn.BatchNorm2d(x_in_c) # ggml_debug
-
-        // ni = n_out + x_in_c # 1280
-        // self.conv = custom_conv_layer(ni, n_out, extra_bn=True)
-        // # (Pdb) self.conv
-        // # Sequential(
-        // #   (0): Conv2d(1280, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-        // #   (1): ReLU(inplace=True)
-        // #   (2): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
-        // # )
-        // self.relu = nn.ReLU()
-
-
-    // bn
-    ggml_tensor_t* bn_weight;  // torch.float32, [192] 
-    ggml_tensor_t* bn_bias;  // torch.float32, [192] 
-    ggml_tensor_t* bn_running_mean;  // torch.float32, [192] 
-    ggml_tensor_t* bn_running_var;  // torch.float32, [192] 
-
-    // conv
-    ggml_tensor_t* conv_0_weight;  // torch.float32, [256, 448, 3, 3] 
-
-    ggml_tensor_t* conv_2_weight;  // torch.float32, [256] 
-    ggml_tensor_t* conv_2_bias;  // torch.float32, [256] 
-    ggml_tensor_t* conv_2_running_mean;  // torch.float32, [256] 
-    ggml_tensor_t* conv_2_running_var;  // torch.float32, [256]
-
+    struct CustomConv2d conv;
 
     void create_weight_tensors(ggml_context_t* ctx) {
         shuf.ni = up_in_c;
@@ -498,11 +526,15 @@ struct UnetBlockWide {
         bn.num_features = x_in_c;
         bn.eps = 1e-5;
         bn.create_weight_tensors(ctx);
-        // conv_0_weight = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, 3, 3, 448, 256);
-        // conv_2_weight = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 256);
-        // conv_2_bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 256);
-        // conv_2_running_mean = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 256);
-        // conv_2_running_var = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 256);
+
+        // ni = n_out + x_in_c # 1280
+        // self.conv = custom_conv_layer(ni, n_out, ks =3, extra_bn=True)
+        conv.ni = n_out + x_in_c;
+        conv.nf = n_out;
+        conv.ks = 3;
+        // conv.use_activ = true;
+        conv.extra_bn = true;
+        conv.create_weight_tensors(ctx);
     }
 
     void setup_weight_names(const char *prefix) {
@@ -514,11 +546,8 @@ struct UnetBlockWide {
         snprintf(s, sizeof(s), "%s%s", prefix, "bn.");
         bn.setup_weight_names(s);
 
-        // ggml_format_name(conv_0_weight, "%s%s", prefix, "conv.0.weight");
-        // ggml_format_name(conv_2_weight, "%s%s", prefix, "conv.2.weight");
-        // ggml_format_name(conv_2_bias, "%s%s", prefix, "conv.2.bias");
-        // ggml_format_name(conv_2_running_mean, "%s%s", prefix, "conv.2.running_mean");
-        // ggml_format_name(conv_2_running_var, "%s%s", prefix, "conv.2.running_var");
+        snprintf(s, sizeof(s), "%s%s", prefix, "conv.");
+        conv.setup_weight_names(s);
     }
 
     ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x) {
@@ -552,7 +581,7 @@ struct Decoder {
         layers_0.create_weight_tensors(ctx);
 
         // m.append(UnetBlockWide(512, 384, 512))
-        layers_0.up_in_c = 512;
+        layers_1.up_in_c = 512;
         layers_1.x_in_c = 384;
         layers_1.n_out = 512;
         layers_1.create_weight_tensors(ctx);
@@ -671,6 +700,7 @@ struct Block {
     ggml_tensor_t *gamma;
 
     void create_weight_tensors(ggml_context_t* ctx) {
+        // kernel_size=(7, 7), stride=(1, 1), padding=(3, 3)
         dwconv.in_channels = dim;
         dwconv.out_channels = dim;
         dwconv.kernel_size = {7, 7};
@@ -744,9 +774,6 @@ struct Block {
     }
 };
 
-/*
- LayerNormChannelsFirst() */
-
 struct LayerNormChannelsFirst {
     // network hparams
     int normalized_shape = 192;
@@ -774,295 +801,6 @@ struct LayerNormChannelsFirst {
     }
 };
 
-/*
- ConvNeXt(
-  (downsample_layers): ModuleList(
-    (0): Sequential(
-      (0): Conv2d(3, 192, kernel_size=(4, 4), stride=(4, 4))
-      (1): LayerNormChannelsFirst()
-    )
-    (1): Sequential(
-      (0): LayerNormChannelsFirst()
-      (1): Conv2d(192, 384, kernel_size=(2, 2), stride=(2, 2))
-    )
-    (2): Sequential(
-      (0): LayerNormChannelsFirst()
-      (1): Conv2d(384, 768, kernel_size=(2, 2), stride=(2, 2))
-    )
-    (3): Sequential(
-      (0): LayerNormChannelsFirst()
-      (1): Conv2d(768, 1536, kernel_size=(2, 2), stride=(2, 2))
-    )
-  )
-  (stages): ModuleList(
-    (0): Sequential(
-      (0): Block(
-        (dwconv): Conv2d(192, 192, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=192)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=192, out_features=768, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=768, out_features=192, bias=True)
-      )
-      (1): Block(
-        (dwconv): Conv2d(192, 192, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=192)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=192, out_features=768, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=768, out_features=192, bias=True)
-      )
-      (2): Block(
-        (dwconv): Conv2d(192, 192, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=192)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=192, out_features=768, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=768, out_features=192, bias=True)
-      )
-    )
-    (1): Sequential(
-      (0): Block(
-        (dwconv): Conv2d(384, 384, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=384)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=384, out_features=1536, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=1536, out_features=384, bias=True)
-      )
-      (1): Block(
-        (dwconv): Conv2d(384, 384, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=384)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=384, out_features=1536, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=1536, out_features=384, bias=True)
-      )
-      (2): Block(
-        (dwconv): Conv2d(384, 384, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=384)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=384, out_features=1536, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=1536, out_features=384, bias=True)
-      )
-    )
-    (2): Sequential(
-      (0): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (1): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (2): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (3): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (4): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (5): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (6): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (7): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (8): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (9): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (10): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (11): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (12): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (13): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (14): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (15): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (16): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (17): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (18): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (19): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (20): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (21): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (22): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (23): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (24): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (25): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-      (26): Block(
-        (dwconv): Conv2d(768, 768, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=768)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=768, out_features=3072, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=3072, out_features=768, bias=True)
-      )
-    )
-    (3): Sequential(
-      (0): Block(
-        (dwconv): Conv2d(1536, 1536, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=1536)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=1536, out_features=6144, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=6144, out_features=1536, bias=True)
-      )
-      (1): Block(
-        (dwconv): Conv2d(1536, 1536, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=1536)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=1536, out_features=6144, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=6144, out_features=1536, bias=True)
-      )
-      (2): Block(
-        (dwconv): Conv2d(1536, 1536, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3), groups=1536)
-        (norm): LayerNormChannelsLast()
-        (pwconv1): Linear(in_features=1536, out_features=6144, bias=True)
-        (act): GELU(approximate='none')
-        (pwconv2): Linear(in_features=6144, out_features=1536, bias=True)
-      )
-    )
-  )
-  (norm0): LayerNormChannelsFirst()
-  (norm1): LayerNormChannelsFirst()
-  (norm2): LayerNormChannelsFirst()
-  (norm3): LayerNormChannelsFirst()
-  (norm): LayerNorm((1536,), eps=1e-06, elementwise_affine=True)
-) */
-
 struct ConvNeXt {
     // network hparams
     
@@ -1071,20 +809,20 @@ struct ConvNeXt {
     struct Conv2d downsample_layers_0_0;
     struct LayerNormChannelsFirst downsample_layers_0_1;
 
-    struct Conv2d downsample_layers_1_0;
-    struct LayerNormChannelsFirst downsample_layers_1_1;
+    struct LayerNormChannelsFirst downsample_layers_1_0;
+    struct Conv2d downsample_layers_1_1;
 
-    struct Conv2d downsample_layers_2_0;
-    struct LayerNormChannelsFirst downsample_layers_2_1;
+    struct LayerNormChannelsFirst downsample_layers_2_0;
+    struct Conv2d downsample_layers_2_1;
 
-    struct Conv2d downsample_layers_3_0;
-    struct LayerNormChannelsFirst downsample_layers_3_1;
+    struct LayerNormChannelsFirst downsample_layers_3_0;
+    struct Conv2d downsample_layers_3_1;
 
     // [3, 3, 27, 3]
     struct Block states_0[3];
     struct Block states_1[3];
     struct Block states_2[27];
-    struct Block states_3[2];
+    struct Block states_3[3];
 
     struct LayerNormChannelsFirst norm0;
     struct LayerNormChannelsFirst norm1;
@@ -1099,33 +837,33 @@ struct ConvNeXt {
         downsample_layers_0_0.out_channels = 192;
         downsample_layers_0_0.kernel_size = {4, 4};
         downsample_layers_0_0.stride = { 4, 4 };
-        downsample_layers_0_0.create_weight_tensors(ctx);
+        downsample_layers_0_0.create_weight_tensors(ctx, GGML_TYPE_F32);
         downsample_layers_0_1.normalized_shape = 192;
         downsample_layers_0_1.create_weight_tensors(ctx);
 
-        downsample_layers_1_0.in_channels = 192;
-        downsample_layers_1_0.out_channels = 384;
-        downsample_layers_1_0.kernel_size = {2, 2};
-        downsample_layers_1_0.stride = { 2, 2 };
+        downsample_layers_1_0.normalized_shape = 192;
         downsample_layers_1_0.create_weight_tensors(ctx);
-        downsample_layers_1_1.normalized_shape = 384;
-        downsample_layers_1_1.create_weight_tensors(ctx);
+        downsample_layers_1_1.in_channels = 192;
+        downsample_layers_1_1.out_channels = 384;
+        downsample_layers_1_1.kernel_size = {2, 2};
+        downsample_layers_1_1.stride = { 2, 2 };
+        downsample_layers_1_1.create_weight_tensors(ctx, GGML_TYPE_F32);
 
-        downsample_layers_2_0.in_channels = 384;
-        downsample_layers_2_0.out_channels = 768;
-        downsample_layers_2_0.kernel_size = {2, 2};
-        downsample_layers_2_0.stride = { 2, 2 };
+        downsample_layers_2_0.normalized_shape = 384;
         downsample_layers_2_0.create_weight_tensors(ctx);
-        downsample_layers_2_1.normalized_shape = 768;
-        downsample_layers_2_1.create_weight_tensors(ctx);
+        downsample_layers_2_1.in_channels = 384;
+        downsample_layers_2_1.out_channels = 768;
+        downsample_layers_2_1.kernel_size = {2, 2};
+        downsample_layers_2_1.stride = { 2, 2 };
+        downsample_layers_2_1.create_weight_tensors(ctx, GGML_TYPE_F32);
 
-        downsample_layers_3_0.in_channels = 768;
-        downsample_layers_3_0.out_channels = 1536;
-        downsample_layers_3_0.kernel_size = {2, 2};
-        downsample_layers_3_0.stride = { 2, 2 };
+        downsample_layers_3_0.normalized_shape = 768;
         downsample_layers_3_0.create_weight_tensors(ctx);
-        downsample_layers_3_1.normalized_shape = 1536;
-        downsample_layers_3_1.create_weight_tensors(ctx);
+        downsample_layers_3_1.in_channels = 768;
+        downsample_layers_3_1.out_channels = 1536;
+        downsample_layers_3_1.kernel_size = {2, 2};
+        downsample_layers_3_1.stride = { 2, 2 };
+        downsample_layers_3_1.create_weight_tensors(ctx, GGML_TYPE_F32);
 
         // [192, 384, 768, 1536]
         for (int i = 0; i < 3; i++) {
@@ -1248,7 +986,7 @@ struct Encoder {
     }
 };
 
-struct DDColor {
+struct DDColor : GGMLNetwork {
     // network hparams
     int MAX_H = 512;
     int MAX_W = 512;
@@ -1258,11 +996,7 @@ struct DDColor {
     struct Encoder encoder;
     struct Decoder decoder;
 
-    struct Conv2d refine_net;
-
-    ggml_tensor_t* refine_net_0_0_bias;  // torch.float32, [2] 
-    ggml_tensor_t* refine_net_0_0_weight;  // torch.float32, [2, 103, 1, 1]
-
+    struct Conv2d refine_net; // instance CustomConv2d ...
 
     void create_weight_tensors(ggml_context_t* ctx) {
         encoder.create_weight_tensors(ctx);
@@ -1271,7 +1005,7 @@ struct DDColor {
         refine_net.in_channels = 103;
         refine_net.out_channels = 2;
         refine_net.kernel_size = {1, 1};
-        refine_net.create_weight_tensors(ctx);
+        refine_net.create_weight_tensors(ctx, GGML_TYPE_F32);
     }
 
     void setup_weight_names(const char *prefix) {
@@ -1286,10 +1020,12 @@ struct DDColor {
         refine_net.setup_weight_names(s);
     }
 
-    ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x) {
-    	// please implement forward by your self, please !!!
+    ggml_tensor_t* forward(ggml_context_t* ctx, int argc, ggml_tensor_t* argv[]) {
+        GGML_UNUSED(argc);
 
-    	return x;
+        ggml_tensor_t* x = argv[0];
+
+        return ggml_nn_identity(ctx, x);
     }
 };
 
