@@ -60,7 +60,9 @@ def multi_head_attention_forward(query, key, value, num_heads: int,
     # k.size() -- [8, 1024, 32]
     # k.transpose(-2, -1).size() -- [8, 32, 1024]
     attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
+    # tensor [attn_output_weights] size: [8, 100, 1024], min: -6.5267, max: 8.720252, mean: 0.013913
     attn_output_weights = F.softmax(attn_output_weights, dim=-1)
+    # tensor [attn_output_weights] size: [8, 100, 1024], min: 0.0, max: 0.250939, mean: 0.000977
 
     attn_output = torch.bmm(attn_output_weights, v)
     # tensor [attn_output] size: [8, 100, 32], min: -3.122495, max: 3.007122, mean: -0.015471
@@ -77,13 +79,16 @@ def multi_head_attention_forward(query, key, value, num_heads: int,
 class MultiheadAttention(nn.Module):
     def __init__(self, embed_dim, num_heads, bias=True, dropout=0.0):
         super().__init__()
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
+        self.embed_dim = embed_dim # 256
+        self.num_heads = num_heads # 8
         self.in_proj_weight = nn.Parameter(torch.zeros((3 * embed_dim, embed_dim)))
         self.in_proj_bias = nn.Parameter(torch.zeros(3 * embed_dim))
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias) # bias == True
 
     def forward(self, query, key, value):
+        # (Pdb) query.size() -- [100, 1, 256]
+        # (Pdb) key.size() -- [1024, 1, 256]
+        # (Pdb) value.size() -- [1024, 1, 256]
         attn_output = multi_head_attention_forward(
             query, key, value,
             self.num_heads,

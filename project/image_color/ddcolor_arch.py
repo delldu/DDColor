@@ -7,7 +7,7 @@ from .unet import CustomPixelShuffle, UnetBlockWide, custom_conv_layer
 
 from .convnext import ConvNeXt
 from .transformer_utils import SelfAttentionLayer, CrossAttentionLayer, FFNLayer, MLP
-from .position_encoding import PositionEmbeddingSine
+from .position_encoding import PositionEmbedding
 
 from typing import List, Tuple
 
@@ -62,10 +62,11 @@ class DDColor(nn.Module):
             nn.utils.remove_spectral_norm(self.decoder.layers[i].shuf.conv[0])
         nn.utils.remove_spectral_norm(self.decoder.last_shuf.conv[0])
 
+
     def load_weights(self, model_path="models/image_color.pth"):
         cdir = os.path.dirname(__file__)
         checkpoint = model_path if cdir == "" else cdir + "/" + model_path
-        self.load_state_dict(torch.load(checkpoint))
+        self.load_state_dict(torch.load(checkpoint), strict=False)
 
     def normalize(self, img):
         return (img - self.mean) / self.std # ggml_debug
@@ -104,7 +105,7 @@ class Decoder(nn.Module):
         self.layers = self.make_layers()
         embed_dim = nf // 2 # --> 256
 
-        self.last_shuf = CustomPixelShuffle(embed_dim, embed_dim, scale=4)
+        self.last_shuf = CustomPixelShuffle(embed_dim, embed_dim, scale=4, extra_bn=False)
         # (Pdb) self.last_shuf
         # CustomPixelShuffle(
         #   (conv): Sequential(
@@ -192,7 +193,7 @@ class Encoder(nn.Module):
     
 
 class MultiScaleColorDecoder(nn.Module):
-    def __init__(self, in_channels,
+    def __init__(self, in_channels, # [512, 512, 256]
         hidden_dim=256,
         num_queries=100,
         nheads=8,
@@ -204,7 +205,7 @@ class MultiScaleColorDecoder(nn.Module):
         super().__init__()
 
         # positional encoding
-        self.pe_layer = PositionEmbeddingSine(hidden_dim // 2)
+        self.pe_layer = PositionEmbedding(hidden_dim // 2)
 
         # define Transformer decoder here
         self.dec_layers = dec_layers
@@ -277,14 +278,7 @@ class MultiScaleColorDecoder(nn.Module):
 
         src = []
         pos = []
-        # for i in range(self.num_feature_levels): # 3
-        #     pos_temp = self.pe_layer(x[i]).flatten(2).permute(2, 0, 1)
-        #     # self.level_embed.weight.size() -- [3, 256]
-        #     src_temp = self.input_proj[i](x[i]).flatten(2) + self.level_embed.weight[i][None, :, None]
-        #     src_temp = src_temp.permute(2, 0, 1)
-        #     pos.append(pos_temp)
-        #     src.append(src_temp)
-        for i, layer in enumerate(self.input_proj):
+        for i, layer in enumerate(self.input_proj): # 3
             # x[0].size() -- [1, 512, 32, 32]
             # self.pe_layer(x[0]).size() -- [1, 256, 32, 32]
             # self.pe_layer(x[0]).flatten(2).size() -- [1, 256, 1024]
@@ -292,31 +286,23 @@ class MultiScaleColorDecoder(nn.Module):
 
             # self.level_embed.weight.size() -- [3, 256]
             src_temp = layer(x[i]).flatten(2) + self.level_embed.weight[i][None, :, None]
+            # [1, 256, 32, 32] --> [1, 256, 1024] + [1, 256, 1]
             src_temp = src_temp.permute(2, 0, 1)
 
             pos.append(pos_temp)
             src.append(src_temp)
 
-        bs = src[0].shape[1] # src[0].shape -- [1024, 1, 256]
+        bs = src[0].shape[1] # src[0].shape -- [1024, 1, 256] ==> 1
 
         # QxNxC
-        query_embed = self.query_embed.weight.unsqueeze(1).repeat(1, bs, 1) # [100, 1024, 256]
-        output = self.query_feat.weight.unsqueeze(1).repeat(1, bs, 1) # [100, 1024, 256]
-        # for i in range(self.dec_layers): # 9
-        #     level_index = i % self.num_feature_levels # 3
-        #     # attention: cross-attention first
-        #     output = self.transformer_cross_attention_layers[i](
-        #         output, src[level_index],
-        #         pos=pos[level_index], query_pos=query_embed
-        #     )
-        #     output = self.transformer_self_attention_layers[i](output, query_pos=query_embed)
-        #     # FFN
-        #     output = self.transformer_ffn_layers[i](output)
+        # self.query_embed.weight -- torch.float32, [100, 256]
+        query_embed = self.query_embed.weight.unsqueeze(1).repeat(1, bs, 1) # [100, 1, 256]
+        output = self.query_feat.weight.unsqueeze(1).repeat(1, bs, 1) # [100, 1, 256]
         i = 0
         for (cross_layer, self_layer, ffn_layer) in zip(
             self.transformer_cross_attention_layers, 
             self.transformer_self_attention_layers,
-            self.transformer_ffn_layers):
+            self.transformer_ffn_layers): # self.dec_layers -- 9
 
             level_index = i % self.num_feature_levels # 3
             # attention: cross-attention first

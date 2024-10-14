@@ -59,7 +59,7 @@ class UnetBlockWide(nn.Module):
         # up_in_c = 1536
         # x_in_c = 768
         # n_out = 512
-        self.shuf = CustomPixelShuffle(up_in_c, n_out, extra_bn=True)
+        self.shuf = CustomPixelShuffle(up_in_c, n_out, scale=2, extra_bn=True)
         # (Pdb) self.shuf
         # CustomPixelShuffle(
         #   (conv): Sequential(
@@ -74,7 +74,7 @@ class UnetBlockWide(nn.Module):
         self.bn = nn.BatchNorm2d(x_in_c) # ggml_debug
 
         ni = n_out + x_in_c # 1280
-        self.conv = custom_conv_layer(ni, n_out, extra_bn=True)
+        self.conv = custom_conv_layer(ni, n_out, ks =3, extra_bn=True)
         # (Pdb) self.conv
         # Sequential(
         #   (0): Conv2d(1280, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
