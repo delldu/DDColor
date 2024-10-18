@@ -262,7 +262,7 @@ int GGMLNetwork::m_network_init()
     {
         // ggml_tensor_overhead() == 400
         struct ggml_init_params params = {
-            /*.mem_size   =*/16 * 1024 * 1024, // 16M
+            /*.mem_size   =*/128 * 1024 * 1024, // 128M
             /*.mem_buffer =*/NULL,
             /*.no_alloc   =*/true, // the tensors no need to be allocated later
         };
@@ -270,8 +270,9 @@ int GGMLNetwork::m_network_init()
         check_point(temp_context);
         create_weight_tensors(temp_context);
 
-        num_tensors = 0;
-        eng->backend_buffer_size = 0;
+        // xxxx_debug
+        num_tensors = 256; // add more temp tensors ...
+        eng->backend_buffer_size = 256*1024*1024;
         for_each_context_tensor(temp_context)
         {
             num_tensors++;

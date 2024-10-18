@@ -17,6 +17,10 @@
 typedef struct ggml_tensor ggml_tensor_t;
 typedef struct ggml_context ggml_context_t;
 
+ggml_tensor_t* ggml_nn_add(ggml_context_t *ctx, ggml_tensor_t *x, float value);
+ggml_tensor_t* ggml_nn_grid_y(ggml_context_t *ctx, ggml_tensor_t *x, int h);
+ggml_tensor_t* ggml_nn_grid_x(ggml_context_t *ctx, ggml_tensor_t *x, int w);
+
 // ----------------------------------------------------------------------------------------------------------------------------------------
 // https://pytorch.org/docs/stable/generated/torch.nn.Identity.html
 ggml_tensor_t* ggml_nn_identity(ggml_context_t* ctx, ggml_tensor_t* x);
@@ -331,7 +335,7 @@ struct MultiheadAttention {
 // https://paperswithcode.com/method/pixelshuffle
 // class torch.nn.PixelShuffle(upscale_factor)[source] -- convert x from (∗,C*r*2, H, W) to (∗, C, H*r, W*r)
 
-ggml_tensor_t* pixel_nn_shuffle(ggml_context_t *ctx, ggml_tensor_t *x, int upscale_factor);
+// ggml_tensor_t* pixel_nn_shuffle(ggml_context_t *ctx, ggml_tensor_t *x, int upscale_factor);
 
 struct PixelShuffle {
     int upscale_factor;
@@ -348,7 +352,8 @@ struct PixelShuffle {
 
     ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x)
     {
-        return pixel_nn_shuffle(ctx, x, upscale_factor);
+        // return pixel_nn_shuffle(ctx, x, upscale_factor);
+        return ggml_shuffle(ctx, x, upscale_factor);
     }
 };
 
@@ -467,12 +472,14 @@ ggml_tensor_t* ggml_nn_layer_norm(ggml_context_t* ctx, ggml_tensor_t* x, ggml_te
 ggml_tensor_t* ggml_nn_batch_norm2d(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tensor_t* w, ggml_tensor_t* b, 
     ggml_tensor_t* mean, ggml_tensor_t* var, float eps)
 {
+    int C = x->ne[2];
+    w = ggml_repeat(ctx, ggml_reshape_4d(ctx, w, 1, 1, C, 1), x);
+    b = ggml_repeat(ctx, ggml_reshape_4d(ctx, b, 1, 1, C, 1), x);
+    mean = ggml_repeat(ctx, ggml_reshape_4d(ctx, mean, 1, 1, C, 1), x);
+    var = ggml_repeat(ctx, ggml_reshape_4d(ctx, var, 1, 1, C, 1), x);
 
-    w = ggml_repeat(ctx, w, x);
-    b = ggml_repeat(ctx, b, x);
-    mean = ggml_repeat(ctx, mean, x);
     // var += eps;
-    var = ggml_repeat(ctx, var, x);
+    var = ggml_nn_add(ctx, var, eps);
     var = ggml_sqrt(ctx, var);
 
     x = ggml_sub(ctx, x, mean);
@@ -549,6 +556,7 @@ static void shuffle_map_function(struct ggml_tensor * dst , const struct ggml_te
 
     // d_ -- destion prefix
     // s_ -- source prefix
+#if 0 // xxxx_debug
     for (int d_b = start; d_b < stop; d_b++) {
         for (int d_w = 0; d_w < W; d_w++) {
             int s_w = d_w / R;
@@ -556,29 +564,32 @@ static void shuffle_map_function(struct ggml_tensor * dst , const struct ggml_te
                 int s_h = d_h / R;
                 for (int d_c = 0; d_c < C; d_c++) {
                     int s_c = d_c*R*R + (d_h % R)*R + (d_w % R);
-                    float v = ggml_get_f32_nd(b, s_w, s_h, s_c, d_b); // d_b and s_b share 
+                    v = ggml_get_f32_nd(b, s_w, s_h, s_c, d_b); // d_b and s_b share 
                     ggml_set_f32_nd(dst, d_w, d_h, d_c, d_b, v);
                 } // d_c
             } // d_h
         } // d_w
     } // d_b
+#endif
+
 }
 
 // convert x from (B, C*r*2, H, W) to (B, C, H*r, W*r)
-ggml_tensor_t* pixel_nn_shuffle(ggml_context_t *ctx, ggml_tensor_t *x, int upscale_factor)
-{
-    int R, W, H, C, B;
-    W = x->ne[0];
-    H = x->ne[1];
-    C = x->ne[2];
-    B = x->ne[3];
-    R = upscale_factor;
+// ggml_tensor_t* pixel_nn_shuffle(ggml_context_t *ctx, ggml_tensor_t *x, int upscale_factor)
+// {
+//     int R, W, H, C, B;
+//     W = x->ne[0];
+//     H = x->ne[1];
+//     C = x->ne[2];
+//     B = x->ne[3];
+//     R = upscale_factor;
 
-    GGML_ASSERT(C % (R*R) == 0);
-    ggml_tensor_t *a = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, W*R, H*W, C/(R*R), B);
-    
-    return ggml_map_custom2(ctx, a, x, shuffle_map_function, GGML_N_TASKS_MAX, &R);
-}
+//     GGML_ASSERT(C % (R*R) == 0);
+//     ggml_tensor_t *a = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, W*R, H*R, C/(R*R), B);
+//     ggml_tensor_t *o = ggml_map_custom2(ctx, a, x, shuffle_map_function, GGML_N_TASKS_MAX, &R);
+
+//     return o;
+// }
 
 // convert x from (B, C, H×r, W×r) to (B, C×r*r, H, W)
 ggml_tensor_t* pixel_nn_unshuffle(ggml_context_t *ctx, ggml_tensor_t *x, int downscale_factor)
@@ -600,7 +611,7 @@ ggml_tensor_t* ggml_nn_normalize(ggml_context_t *ctx, ggml_tensor_t *x, ggml_ten
 {
     mean = ggml_repeat(ctx, mean, x);
     std = ggml_repeat(ctx, std, x);
-
+    std = ggml_nn_add(ctx, std, 1e-5); // xxxx_debug
     return ggml_div(ctx, ggml_sub(ctx, x, mean), std);
 }
 
@@ -613,13 +624,14 @@ ggml_tensor_t* ggml_nn_mean(ggml_context_t *ctx, ggml_tensor_t *x, int dim)
         dims[i] = (i < dim) ? i + 1: 0; // [0, 1, ..., dim] --> [1, ..., dim, 0]
     }
     x = ggml_cont(ctx, ggml_permute(ctx, x, dims[0], dims[1], dims[2], dims[3]));
-
     // ------------------------------------------------------------------------
-    x = ggml_mean(ctx, x); // mean on dim 0
+    // ggml_mean(ctx, x); // mean on dim 0
+    float m = (float)x->ne[0];
+    x = ggml_sum_rows(ctx, x);
+    x = ggml_scale(ctx, x, m);
     // ------------------------------------------------------------------------
-
     for (int i = 0; i <= dim; i++) {
-        dims[i] = (i == 0) ? dim : dim - 1; // [0, 1, ..., dim] --> [dim, 0, ..., dim - 1]
+        dims[i] = (i == 0) ? dim : i - 1; // [0, 1, ..., dim] --> [dim, 0, ..., dim - 1]
     }
     x = ggml_cont(ctx, ggml_permute(ctx, x, dims[0], dims[1], dims[2], dims[3]));
 
@@ -630,15 +642,26 @@ ggml_tensor_t* ggml_nn_avgpool2d(ggml_context_t *ctx, ggml_tensor_t *x, int kern
 {
     ggml_tensor_t *y;
 
+    x = ggml_cont(ctx, ggml_pad(ctx, x, 1, 1, 0, 0)); // W+1, H+1, C, B
+    x = ggml_cont(ctx, x);
+
     int W = (int)x->ne[0];
     int H = (int)x->ne[1];
     int C = (int)x->ne[2];
     int B = (int)x->ne[3];
-
-    x = ggml_reshape_3d(ctx, x, W, H, C*B);
-    y = ggml_pool_2d(ctx, x, GGML_OP_POOL_AVG, kernel_size, kernel_size, stride_size, stride_size, 1, 1);
-    y = ggml_reshape_4d(ctx, y, W + 1, H + 1, C, B);
-
+    x = ggml_cont(ctx, ggml_reshape_3d(ctx, x, W, H, C*B));
+    // GGML_API struct ggml_tensor * ggml_pool_2d(
+    //         struct ggml_context * ctx,
+    //         struct ggml_tensor  * a,
+    //         enum ggml_op_pool     op,
+    //         int                   k0,
+    //         int                   k1,
+    //         int                   s0,
+    //         int                   s1,
+    //         float                 p0,
+    //         float                 p1);
+    y = ggml_cont(ctx, ggml_pool_2d(ctx, x, GGML_OP_POOL_AVG, kernel_size, kernel_size, stride_size, stride_size, 1, 1));
+    y = ggml_cont(ctx, ggml_reshape_4d(ctx, y, W + 1, H + 1, C, B));
     y = ggml_nn_slice(ctx, y, 0 /*dim*/, 1 /*start*/, W /*stop*/, 1 /*step*/);
     y = ggml_nn_slice(ctx, y, 1 /*dim*/, 1 /*start*/, H /*stop*/, 1 /*step*/);
 
@@ -699,10 +722,11 @@ std::vector<ggml_tensor_t *> ggml_nn_chunks(ggml_context_t *ctx, ggml_tensor_t *
     int S = (B + k - 1) / k;
     std::vector<ggml_tensor_t *> chunks;
 
-    for (int i = 0; i < k; k++) {
+    for (int i = 0; i < k; i++) {
         ggml_tensor_t *c = ggml_nn_slice(ctx, x, dim, i * S, (i + 1)*S, 1);
         chunks.push_back(c);
     }
+
     return chunks;
 }
 
@@ -721,5 +745,30 @@ ggml_tensor_t* ggml_nn_mul_mat(ggml_context_t *ctx, ggml_tensor_t *a, ggml_tenso
     b = ggml_cont(ctx, ggml_permute(ctx, b, 1, 0, 2, 3));
     return ggml_mul_mat(ctx, b, a);
 }
+
+
+ggml_tensor_t* ggml_nn_add(ggml_context_t *ctx, ggml_tensor_t *x, float value)
+{
+    ggml_tensor_t *a = ggml_dup(ctx, x);
+    a = ggml_clamp(ctx, a, value, value); // a = value
+
+    return ggml_add(ctx, x, a);
+}
+
+ggml_tensor_t* ggml_nn_grid_y(ggml_context_t *ctx, ggml_tensor_t *x, int h)
+{
+    int w = x->ne[0];
+    ggml_tensor_t *a = ggml_new_tensor_2d(ctx,  GGML_TYPE_F32, w, h); // a -- shape template
+    ggml_tensor_t *y = ggml_repeat(ctx, x, a); // shape like a
+    return ggml_cont(ctx, y);
+}
+
+ggml_tensor_t* ggml_nn_grid_x(ggml_context_t *ctx, ggml_tensor_t *x, int w)
+{
+    ggml_tensor_t *y = ggml_nn_grid_y(ctx, x, w);
+    y = ggml_transpose(ctx, y);
+    return ggml_cont(ctx, y);
+}
+
 
 #endif // GGML_NN_IMPLEMENTATION
