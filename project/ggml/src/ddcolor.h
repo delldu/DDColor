@@ -1173,11 +1173,12 @@ struct LayerNormChannelsFirst {
         s = ggml_repeat(ctx, s, d);
         x = ggml_div(ctx, d, s);
 
-        ggml_tensor_t *g_weight = ggml_reshape_3d(ctx, w, 1, 1, normalized_shape);
-        g_weight = ggml_repeat(ctx, g_weight, x); // f32 [128, 128, 192, 1]
+        ggml_tensor_t *g_weight = ggml_reshape_4d(ctx, w, 1, 1, normalized_shape, 1);
+        g_weight = ggml_cont(ctx, ggml_repeat(ctx, g_weight, x)); // f32 [128, 128, 192, 1]
+
 
         ggml_tensor_t *g_bias = ggml_reshape_3d(ctx, b, 1, 1, normalized_shape);
-        g_bias = ggml_repeat(ctx, g_bias, x); // f32 [128, 128, 192, 1]
+        g_bias = ggml_cont(ctx, ggml_repeat(ctx, g_bias, x)); // f32 [128, 128, 192, 1]
 
         ggml_tensor_t *y = ggml_mul(ctx, x, g_weight);
         y = ggml_add(ctx, y, g_bias); // y    f32 [128, 128, 192, 1], 
