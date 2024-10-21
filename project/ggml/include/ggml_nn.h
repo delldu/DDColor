@@ -335,7 +335,6 @@ struct MultiheadAttention {
 // https://paperswithcode.com/method/pixelshuffle
 // class torch.nn.PixelShuffle(upscale_factor)[source] -- convert x from (∗,C*r*2, H, W) to (∗, C, H*r, W*r)
 
-// ggml_tensor_t* pixel_nn_shuffle(ggml_context_t *ctx, ggml_tensor_t *x, int upscale_factor);
 
 struct PixelShuffle {
     int upscale_factor;
@@ -352,7 +351,6 @@ struct PixelShuffle {
 
     ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x)
     {
-        // return pixel_nn_shuffle(ctx, x, upscale_factor);
         return ggml_shuffle(ctx, x, upscale_factor);
     }
 };
@@ -535,61 +533,6 @@ ggml_tensor_t* ggml_nn_linear(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tensor
     return x;
 }
 
-static void shuffle_map_function(struct ggml_tensor * dst , const struct ggml_tensor * a, const struct ggml_tensor * b, int ith, int nth, void * userdata)
-{
-    float v;
-    int R, W, H, C, B;
-
-    GGML_UNUSED(a);
-
-    R = *(int *)userdata;
-    W = (int)dst->ne[0];
-    H = (int)dst->ne[1];
-    C = (int)dst->ne[2];
-    B = (int)dst->ne[3];
-
-    int dr = (B + nth - 1)/nth;
-    int start = ith * dr;
-    int stop = start + dr; // MIN(start + dr, B)
-    if (stop > B)
-        stop = B;
-
-    // d_ -- destion prefix
-    // s_ -- source prefix
-#if 0 // xxxx_debug
-    for (int d_b = start; d_b < stop; d_b++) {
-        for (int d_w = 0; d_w < W; d_w++) {
-            int s_w = d_w / R;
-            for (int d_h = 0; d_h < H; d_h++) {
-                int s_h = d_h / R;
-                for (int d_c = 0; d_c < C; d_c++) {
-                    int s_c = d_c*R*R + (d_h % R)*R + (d_w % R);
-                    v = ggml_get_f32_nd(b, s_w, s_h, s_c, d_b); // d_b and s_b share 
-                    ggml_set_f32_nd(dst, d_w, d_h, d_c, d_b, v);
-                } // d_c
-            } // d_h
-        } // d_w
-    } // d_b
-#endif
-
-}
-
-// convert x from (B, C*r*2, H, W) to (B, C, H*r, W*r)
-// ggml_tensor_t* pixel_nn_shuffle(ggml_context_t *ctx, ggml_tensor_t *x, int upscale_factor)
-// {
-//     int R, W, H, C, B;
-//     W = x->ne[0];
-//     H = x->ne[1];
-//     C = x->ne[2];
-//     B = x->ne[3];
-//     R = upscale_factor;
-
-//     GGML_ASSERT(C % (R*R) == 0);
-//     ggml_tensor_t *a = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, W*R, H*R, C/(R*R), B);
-//     ggml_tensor_t *o = ggml_map_custom2(ctx, a, x, shuffle_map_function, GGML_N_TASKS_MAX, &R);
-
-//     return o;
-// }
 
 // convert x from (B, C, H×r, W×r) to (B, C×r*r, H, W)
 ggml_tensor_t* pixel_nn_unshuffle(ggml_context_t *ctx, ggml_tensor_t *x, int downscale_factor)
@@ -611,7 +554,6 @@ ggml_tensor_t* ggml_nn_normalize(ggml_context_t *ctx, ggml_tensor_t *x, ggml_ten
 {
     mean = ggml_repeat(ctx, mean, x);
     std = ggml_repeat(ctx, std, x);
-    std = ggml_nn_add(ctx, std, 1e-5); // xxxx_debug
     return ggml_div(ctx, ggml_sub(ctx, x, mean), std);
 }
 

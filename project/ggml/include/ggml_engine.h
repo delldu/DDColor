@@ -270,9 +270,8 @@ int GGMLNetwork::m_network_init()
         check_point(temp_context);
         create_weight_tensors(temp_context);
 
-        // xxxx_debug
-        num_tensors = 256; // add more temp tensors ...
-        eng->backend_buffer_size = 256*1024*1024;
+        num_tensors = 0;
+        eng->backend_buffer_size = 0;
         for_each_context_tensor(temp_context)
         {
             num_tensors++;
@@ -813,6 +812,7 @@ TENSOR* get_tensor_value(ggml_tensor_t* tensor)
     auto qtype = ggml_internal_get_type_traits(tensor->type);
     CHECK_POINT(qtype.to_float != NULL);
     qtype.to_float(from_backend ? backend_data : tensor->data, (float*)nt->data, n);
+
 
 // free_backend:    
     if (from_backend)
