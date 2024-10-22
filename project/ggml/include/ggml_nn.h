@@ -245,96 +245,9 @@ struct GroupNorm {
 
 ggml_tensor_t* ggml_nn_attention(ggml_context_t* ctx, ggml_tensor_t* q, ggml_tensor_t* k, ggml_tensor_t* v, bool mask);
 
-#if 0
-struct MultiheadAttention {
-    int64_t embed_dim;
-    int64_t n_head;
-    bool bias = true;
-
-    Linear q_proj;
-    Linear k_proj;
-    Linear v_proj;
-    Linear out_proj;
-
-    void create_weight_tensors(ggml_context_t* ctx, ggml_type wtype=GGML_TYPE_Q8_0)
-    {
-        q_proj.in_features = embed_dim;
-        q_proj.out_features = embed_dim;
-        q_proj.has_bias = bias;
-        q_proj.create_weight_tensors(ctx, wtype);
-
-        k_proj.in_features = embed_dim;
-        k_proj.out_features = embed_dim;
-        k_proj.has_bias = bias;
-        k_proj.create_weight_tensors(ctx, wtype);
-
-        v_proj.in_features = embed_dim;
-        v_proj.out_features = embed_dim;
-        v_proj.has_bias = bias;
-        v_proj.create_weight_tensors(ctx, wtype);
-
-        out_proj.in_features = embed_dim;
-        out_proj.out_features = embed_dim;
-        out_proj.has_bias = bias;
-        out_proj.create_weight_tensors(ctx, wtype);
-    }
-
-    void setup_weight_names(const char* prefix)
-    {
-        char s[GGML_MAX_NAME];
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "q_proj.");
-        q_proj.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "k_proj.");
-        k_proj.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "v_proj.");
-        v_proj.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "out_proj.");
-        out_proj.setup_weight_names(s);
-    }
-
-    ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x, bool mask)
-    {
-        // embed_dim = 768, n_head = 12, bias = 1, mask = 1
-        // x:    f32 [768, 77, 1, 1], 
-        // embed_dim = 1280, n_head = 20, bias = 1, mask = 1
-        // x:    f32 [1280, 77, 1, 1], 
-
-        int64_t N = x->ne[2]; // ==> 1
-        int64_t n_token = x->ne[1]; // ==> 77
-        int64_t d_head = embed_dim / n_head; // ==> 64
-
-        ggml_tensor_t* q = q_proj.forward(ctx, x);
-        q = ggml_reshape_4d(ctx, q, d_head, n_head, n_token, N); // [N, n_token, n_head, d_head]
-        q = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3)); // [N, n_head, n_token, d_head]
-        q = ggml_reshape_3d(ctx, q, d_head, n_token, n_head * N); // [N * n_head, n_token, d_head]
-
-        ggml_tensor_t* k = k_proj.forward(ctx, x);
-        k = ggml_reshape_4d(ctx, k, d_head, n_head, n_token, N); // [N, n_token, n_head, d_head]
-        k = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3)); // [N, n_head, n_token, d_head]
-        k = ggml_reshape_3d(ctx, k, d_head, n_token, n_head * N); // [N * n_head, n_token, d_head]
-
-        ggml_tensor_t* v = v_proj.forward(ctx, x);
-        v = ggml_reshape_4d(ctx, v, d_head, n_head, n_token, N); // [N, n_token, n_head, d_head]
-        v = ggml_cont(ctx, ggml_permute(ctx, v, 1, 2, 0, 3)); // [N, n_head, d_head, n_token]
-        v = ggml_reshape_3d(ctx, v, n_token, d_head, n_head * N); // [N * n_head, d_head, n_token]
-
-        ggml_tensor_t* kqv = ggml_nn_attention(ctx, q, k, v, mask); // [N * n_head, n_token, d_head]
-
-        kqv = ggml_reshape_4d(ctx, kqv, d_head, n_token, n_head, N);
-        kqv = ggml_cont(ctx, ggml_permute(ctx, kqv, 0, 2, 1, 3)); // [N, n_token, n_head, d_head]
-        x = ggml_reshape_3d(ctx, kqv, d_head * n_head, n_token, N); // [N, n_token, d_head * n_head]
-
-        x = out_proj.forward(ctx, x); // [N, n_token, embed_dim]
-        return x;
-    }
-};
-#endif
-
 // ----------------------------------------------------------------------------------------------------------------------------------------
 // https://paperswithcode.com/method/pixelshuffle
 // class torch.nn.PixelShuffle(upscale_factor)[source] -- convert x from (∗,C*r*2, H, W) to (∗, C, H*r, W*r)
-
 
 struct PixelShuffle {
     int upscale_factor;
@@ -461,6 +374,15 @@ ggml_tensor_t* ggml_nn_conv_2d(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tenso
 ggml_tensor_t* ggml_nn_layer_norm(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tensor_t* w, ggml_tensor_t* b, float eps)
 {
     x = ggml_norm(ctx, x, eps);
+    // ggml_tensor_t *u = ggml_nn_mean(ctx, x, 0); // dim = 0
+    // u = ggml_repeat(ctx, u, x);
+    // ggml_tensor_t *d = ggml_sub(ctx, x, u);
+    // ggml_tensor_t *s = ggml_mul(ctx, d, d);
+    // s = ggml_nn_mean(ctx, s, 0); // dim = 0
+    // s = ggml_nn_add(ctx, s, eps);
+    // s = ggml_sqrt(ctx, s);
+    // x = ggml_div(ctx, d, s);
+    // ------------------------------------------------
     x = ggml_mul(ctx, x, w);
     x = ggml_add(ctx, x, b);
     return x;
@@ -562,13 +484,12 @@ ggml_tensor_t* ggml_nn_mean(ggml_context_t *ctx, ggml_tensor_t *x, int dim)
     int dims[4] = {0, 1, 2, 3};
 
     for (int i = 0; i <= dim; i++) {
-        dims[i] = (i < dim) ? i + 1: 0; // [0, 1, ..., dim] --> [1, ..., dim, 0]
+        dims[i] = (i < dim) ? i + 1 : 0; // [0, 1, ..., dim] --> [1, ..., dim, 0]
     }
     x = ggml_cont(ctx, ggml_permute(ctx, x, dims[0], dims[1], dims[2], dims[3]));
     // ------------------------------------------------------------------------
     // x = ggml_mean(ctx, x); // mean on dim 0, xxxx_debug
     float m = (float)x->ne[0];
-    // CheckPoint("x->ne[0] = %ld, 1.0/m = %.4f", x->ne[0], 1.0/m);
     x = ggml_sum_rows(ctx, x);
     x = ggml_scale(ctx, x, 1.0/m);
     // ------------------------------------------------------------------------

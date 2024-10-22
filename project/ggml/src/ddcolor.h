@@ -713,6 +713,7 @@ struct MultiScaleColorDecoder {
             pos_temp = ggml_reshape_3d(ctx, pos_temp, pos_temp->ne[0] * pos_temp->ne[1], pos_temp->ne[2], pos_temp->ne[3]);
             pos_temp = ggml_cont(ctx, ggml_permute(ctx, pos_temp, 2, 0, 1, 3)); // [1024, 256, 1, 1] --> [256, 1, 1024, 1]
             pos[i] = pos_temp;
+            // return pos_temp;
 
             ggml_tensor_t *src_temp = input_proj[i].forward(ctx, x[i]);
             src_temp = ggml_reshape_3d(ctx, pos_temp, src_temp->ne[0] * src_temp->ne[1], src_temp->ne[2], src_temp->ne[3]);
@@ -838,6 +839,7 @@ struct CustomPixelShuffle {
         x = conv.forward(ctx, x);
         x = ggml_relu_inplace(ctx, x);
         x = shuf.forward(ctx, x);
+
         x = blur.forward(ctx, x); // ggml_nn_avgpool2d 
 
     	return x;
@@ -917,9 +919,6 @@ struct UnetBlockWide {
     //     return self.conv(cat_x)
 
     ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* up_in, ggml_tensor_t* s) {
-        // CheckPoint("==================");
-        // ggml_tensor_dump("up_in", up_in);
-        // ggml_tensor_dump("s", s);
         // up_in    f32 [16, 16, 1536, 1], 
         // s    f32 [32, 32, 768, 1], 
 
@@ -1029,6 +1028,13 @@ struct Decoder {
         ggml_tensor_t* x3 = encoder_output_layers[3];
 
         auto out0 = layers_0.forward(ctx, x3, x2);
+
+        // tensor [out0] size: [1, 512, 32, 32], min: -2.069555, max: 19.295805, mean: 0.719061
+        // tensor [out1] size: [1, 512, 64, 64], min: -1.876326, max: 12.327553, mean: 0.428374
+        // tensor [out2] size: [1, 256, 128, 128], min: -2.441718, max: 10.720449, mean: 0.038218
+        // tensor [out3] size: [1, 256, 512, 512], min: 0.0, max: 0.251905, mean: 0.025275
+        // tensor [out] size: [1, 100, 512, 512], min: 8.435498, max: 27.520004, mean: 19.525377
+
         auto out1 = layers_1.forward(ctx, out0, x1);
         auto out2 = layers_2.forward(ctx, out1, x0);
         auto out3 = last_shuf.forward(ctx, out2);
@@ -1038,11 +1044,50 @@ struct Decoder {
         // out2    f32 [128, 128, 256, 1], 
         // out3    f32 [512, 512, 256, 1],  (cont) (reshaped) (cont) (view) (view)        
 
-        // ggml_tensor_dump("img_features", img_features);
         ggml_tensor_t* xs[3] = {out0, out1, out2};
         auto out = color_decoder.forward(ctx, xs, out3);
+        // tensor [out_feat] size: [1, 100, 512, 512], min: 30.506298, max: 30.506361, mean: 30.506342
 
     	return out; // out    f32 [512, 512, 100, 1],  (reshaped) (cont)
+    }
+};
+
+struct LayerNormChannelsLast {
+    // network hparams
+    int normalized_shape = 192;
+    float eps = 1e-06;
+
+    // network params
+    ggml_tensor_t *w;
+    ggml_tensor_t *b;
+
+    void create_weight_tensors(ggml_context_t* ctx) {
+        w = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, normalized_shape);
+        b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, normalized_shape);
+    }
+
+    void setup_weight_names(const char *prefix) {
+        // char s[GGML_MAX_NAME];
+        ggml_format_name(w, "%s%s", prefix, "weight");
+        ggml_format_name(b, "%s%s", prefix, "bias");
+    }
+
+    ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x) {
+        // x = ggml_norm(ctx, x, eps);
+        // ------------------------------------------------
+        ggml_tensor_t *u = ggml_nn_mean(ctx, x, 0); // dim = 0
+        u = ggml_repeat(ctx, u, x);
+        ggml_tensor_t *d = ggml_sub(ctx, x, u);
+        ggml_tensor_t *s = ggml_mul(ctx, d, d);
+        s = ggml_nn_mean(ctx, s, 0); // dim = 0
+        s = ggml_nn_add(ctx, s, eps);
+        s = ggml_sqrt(ctx, s);
+        x = ggml_div(ctx, d, s);
+        // ------------------------------------------------
+        x = ggml_mul(ctx, x, w);
+        x = ggml_add(ctx, x, b);
+
+        return x; 
     }
 };
 
@@ -1052,7 +1097,7 @@ struct Block {
 
     // network params
     struct Conv2d dwconv;
-    struct LayerNorm norm; // LayerNormChannelsLast
+    struct LayerNormChannelsLast norm;
     struct Linear pwconv1;
     struct Linear pwconv2;
     ggml_tensor_t *gamma;
@@ -1154,19 +1199,16 @@ struct LayerNormChannelsFirst {
         ggml_format_name(b, "%s%s", prefix, "bias");
     }
 
-
     ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x) {
         // x    f32 [128, 128, 192, 1]
         ggml_tensor_t *u = ggml_nn_mean(ctx, x, 2); // dim == 2
         // u    f32 [128, 128, 1, 1]
 
         u = ggml_repeat(ctx, u, x);
-        ggml_tensor_t *d = ggml_sub(ctx, x, u);
+        ggml_tensor_t *d = ggml_sub(ctx, x, u); // [128, 128, 192, 1]
         ggml_tensor_t *s = ggml_mul(ctx, d, d);
 
-        // s    f32 [128, 128, 192, 1], 
-        s = ggml_nn_mean(ctx, s, 2); // # dim = 2
-        // s    f32 [128, 128, 1, 1],  (permuted) (cont)
+        s = ggml_nn_mean(ctx, s, 2); // dim = 2, [128, 128, 192, 1] --> [128, 128, 1, 1]
         s = ggml_nn_add(ctx, s, eps);
         s = ggml_sqrt(ctx, s);
         s = ggml_repeat(ctx, s, d);
@@ -1349,20 +1391,10 @@ struct ConvNeXt {
         x = downsample_layers_0_0.forward(ctx, x);
         x = downsample_layers_0_1.forward(ctx, x);
 
-        // tensor [z1] size: [1, 192, 128, 128], min: -5.461643, max: 3.563172, mean: 0.154698
-        // min: -5.4666, max: 3.5474, mean: 0.1549
-        // tensor [z2] size: [1, 192, 128, 128], min: -6.796315, max: 7.445028, mean: -0.00847
-
-        // # tensor [x] size: [1, 192, 128, 128], min: -6.796315, max: 7.445028, mean: -0.00847
-        // # tensor [x] size: [1, 384, 64, 64], min: -10.776752, max: 11.803871, mean: 0.029293
-        // # tensor [x] size: [1, 768, 32, 32], min: -11.667679, max: 21.679581, mean: 0.021038
-        // # tensor [x] size: [1, 1536, 16, 16], min: -69.043289, max: 41.44706, mean: 0.014986
-
         // x = states_0(x)
         for (int i = 0; i < ARRAY_SIZE(states_0); i++) {
             x = states_0[i].forward(ctx, x);
         }
-        x0123.push_back(x);
         // # tensor [x] size: [1, 192, 128, 128], min: -64.94043, max: 29.835566, mean: -0.141978
 
         // x = norm_0(x)
@@ -1492,6 +1524,7 @@ struct DDColor : GGMLNetwork {
         GGML_UNUSED(argc);
         ggml_tensor_t* x = argv[0];
         GGML_ASSERT(x->ne[0] == 512 && x->ne[1] == 512 && x->ne[2] == 3); // Channel == 3, 512x512
+
         // tensor [x] size: [1, 3, 512, 512], min: 0.0, max: 0.929419, mean: 0.368175
         // min: 0.0000, max: 0.9366, mean: 0.3692
         // 0.0667 0.0608 0.0664 0.0736 0.0707 0.0678 0.0631 0.0565 0.0478 0.0444 ... 0.3216 0.3216 0.3216 0.3216 0.3216 0.3216 0.3216 0.3216 0.3216 0.3216 
@@ -1501,6 +1534,7 @@ struct DDColor : GGMLNetwork {
         // tensor [normalize(x)] size: [1, 3, 512, 512], min: -2.117904, max: 2.326308, mean: -0.356781
 
         // OK !!!
+
         std::vector<ggml_tensor_t *> encoder_layers = encoder.forward(ctx, x);
         // encoder_layers is tuple: len = 4
         //     tensor [item] size: [1, 192, 128, 128], min: -10.815851, max: 5.158478, mean: -0.007829
@@ -1508,11 +1542,10 @@ struct DDColor : GGMLNetwork {
         //     tensor [item] size: [1, 768, 32, 32], min: -6.887635, max: 24.325577, mean: 0.001135
         //     tensor [item] size: [1, 1536, 16, 16], min: -26.544884, max: 16.26297, mean: -0.00155
 
-        return encoder_layers[0]; // xxxx_debug
+        // return encoder_layers[3]; // xxxx_debug
 
         auto out_feat = decoder.forward(ctx, encoder_layers);
-
-        // tensor [out_feat] size: [1, 100, 512, 512], min: -14.656635, max: 24.051313, mean: 1.814844
+        // # tensor [out_feat] size: [1, 100, 512, 512], min: -14.656635, max: 24.051313, mean: 1.814844
 
         // out_feat    f32 [512, 512, 100, 1],  (reshaped) (cont)
         auto coarse_input = ggml_concat(ctx, out_feat, x, 2); // 2 -- on channel
@@ -1522,8 +1555,8 @@ struct DDColor : GGMLNetwork {
         auto out_ab = refine_net.forward(ctx, coarse_input);
         // tensor [out_ab] size: [1, 2, 512, 512], min: -41.829132, max: 52.045349, mean: 4.471401
 
-        return out_ab; // xxxx_debug
         // return ggml_scale(ctx, out_ab, 1.0/128.0); // f32 [512, 512, 2, 1]
+        return out_ab;
     }
 };
 
