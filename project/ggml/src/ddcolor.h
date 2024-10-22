@@ -1100,39 +1100,37 @@ struct Block {
     }
 
     ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x) {
-        //         input = x
-        //         x = self.dwconv(x)
-        //         x = x.permute(0, 2, 3, 1) # (N, C, H, W) -> (N, H, W, C)
-
-        //         x = self.norm(x)
-        //         x = self.pwconv1(x)
-        //         x = self.act(x)
-        //         x = self.pwconv2(x)
-
-        //         x = self.gamma * x
-        //         x = x.permute(0, 3, 1, 2) # (N, H, W, C) -> (N, C, H, W)
-
-        //         x = x + input
-        //         return x
         auto input = x; // f32 [128, 128, 192, 1]
         x = dwconv.forward(ctx, x);
         // f32 [128, 128, 192, 1]
 
         x = ggml_cont(ctx, ggml_permute(ctx, x, 1, 2, 0, 3)); // [128, 128, 192, 1] --> [192, 128, 128, 1]
-        x = norm.forward(ctx, x);
+
+        x = norm.forward(ctx, x); // [192, 128, 128, 1]
 
         x = pwconv1.forward(ctx, x);
-        x = ggml_relu_inplace(ctx, x);
+        // x    f32 [768, 128, 128, 1], 
+
+        // # x.size() -- [1, 128, 128, 192]
+        // # self.pwconv1.weight.size() -- [768, 192]
+        // # self.pwconv1.bias.size() -- [768]
+        // x = self.pwconv1(x)
+        // # x.size() -- [1, 128, 128, 768]
+
+        x = ggml_gelu_inplace(ctx, x);
         x = pwconv2.forward(ctx, x);
 
-        x = ggml_mul_mat(ctx, gamma, x);
-        x = ggml_cont(ctx, ggml_permute(ctx, x, 2, 0, 1, 3));  // [1, 128, 128, 1]-->[128, 128, 1, 1]
+        // x = gamma * x, dot multi ...
+        gamma = ggml_repeat(ctx, gamma, x);
+        x = ggml_mul(ctx, gamma, x);
 
-        // x f32 [128, 128, 1, 1]
+        x = ggml_cont(ctx, ggml_permute(ctx, x, 2, 0, 1, 3));  // [192, 128, 128, 1]-->[128, 128, 192, 1]
+
+        // x f32 [128, 128, 192, 1]
         // input f32 [128, 128, 192, 1]
-        x = ggml_add(ctx, ggml_repeat(ctx, x, input), input);
+        x = ggml_add(ctx, x, input);
 
-    	return x;
+    	return x; // x    f32 [128, 128, 192, 1], 
     }
 };
 
@@ -1161,6 +1159,7 @@ struct LayerNormChannelsFirst {
         // x    f32 [128, 128, 192, 1]
         ggml_tensor_t *u = ggml_nn_mean(ctx, x, 2); // dim == 2
         // u    f32 [128, 128, 1, 1]
+
         u = ggml_repeat(ctx, u, x);
         ggml_tensor_t *d = ggml_sub(ctx, x, u);
         ggml_tensor_t *s = ggml_mul(ctx, d, d);
@@ -1176,8 +1175,7 @@ struct LayerNormChannelsFirst {
         ggml_tensor_t *g_weight = ggml_reshape_4d(ctx, w, 1, 1, normalized_shape, 1);
         g_weight = ggml_cont(ctx, ggml_repeat(ctx, g_weight, x)); // f32 [128, 128, 192, 1]
 
-
-        ggml_tensor_t *g_bias = ggml_reshape_3d(ctx, b, 1, 1, normalized_shape);
+        ggml_tensor_t *g_bias = ggml_reshape_4d(ctx, b, 1, 1, normalized_shape, 1);
         g_bias = ggml_cont(ctx, ggml_repeat(ctx, g_bias, x)); // f32 [128, 128, 192, 1]
 
         ggml_tensor_t *y = ggml_mul(ctx, x, g_weight);
@@ -1350,30 +1348,21 @@ struct ConvNeXt {
         // x = downsample_layers_0(x)
         x = downsample_layers_0_0.forward(ctx, x);
         x = downsample_layers_0_1.forward(ctx, x);
-        x0123.push_back(x); // xxxx_debug
 
-        // x0123.push_back(x);
         // tensor [z1] size: [1, 192, 128, 128], min: -5.461643, max: 3.563172, mean: 0.154698
         // min: -5.4666, max: 3.5474, mean: 0.1549
-        // 0.3506 0.3341 0.3502 0.3942 0.2379 0.3711 0.3452 0.3547 0.5864 0.8054 ... -0.0094 -0.0206 -0.0262 -0.0267 -0.0292 -0.0275 -0.0377 -0.0319 -0.0326 -0.0128 
-
         // tensor [z2] size: [1, 192, 128, 128], min: -6.796315, max: 7.445028, mean: -0.00847
-
-
 
         // # tensor [x] size: [1, 192, 128, 128], min: -6.796315, max: 7.445028, mean: -0.00847
         // # tensor [x] size: [1, 384, 64, 64], min: -10.776752, max: 11.803871, mean: 0.029293
         // # tensor [x] size: [1, 768, 32, 32], min: -11.667679, max: 21.679581, mean: 0.021038
         // # tensor [x] size: [1, 1536, 16, 16], min: -69.043289, max: 41.44706, mean: 0.014986
 
-
         // x = states_0(x)
-        for (int i = 0; i < ARRAY_SIZE(states_0); i++)
+        for (int i = 0; i < ARRAY_SIZE(states_0); i++) {
             x = states_0[i].forward(ctx, x);
-
-        // min: -62.7418, max: -1.9855, mean: -9.5283
-        // -21.4863 -21.6676 -22.6007 -21.7629 -18.8437 -18.3851 -18.4870 -18.5585 -18.5567 -18.5541 ... -51.9713 -51.9706 -51.9655 -51.9887 -52.0156 -51.9369 -51.8248 -54.3483 -59.2463 -50.7493 
-
+        }
+        x0123.push_back(x);
         // # tensor [x] size: [1, 192, 128, 128], min: -64.94043, max: 29.835566, mean: -0.141978
 
         // x = norm_0(x)
@@ -1388,8 +1377,9 @@ struct ConvNeXt {
         x = downsample_layers_1_1.forward(ctx, x);
     
         // x = states_1(x)
-        for (int i = 0; i < ARRAY_SIZE(states_1); i++)
+        for (int i = 0; i < ARRAY_SIZE(states_1); i++) {
             x = states_1[i].forward(ctx, x);
+        }
     
         x = norm_1.forward(ctx, x);
         x0123.push_back(x);
@@ -1401,8 +1391,9 @@ struct ConvNeXt {
         x = downsample_layers_2_1.forward(ctx, x);
     
         // x = states_2(x)
-        for (int i = 0; i < ARRAY_SIZE(states_2); i++)
+        for (int i = 0; i < ARRAY_SIZE(states_2); i++) {
             x = states_2[i].forward(ctx, x);
+        }
         x = norm_2.forward(ctx, x);
         x0123.push_back(x);
 
@@ -1412,8 +1403,9 @@ struct ConvNeXt {
         x = downsample_layers_3_0.forward(ctx, x);
         x = downsample_layers_3_1.forward(ctx, x);
         // x = states_3(x)
-        for (int i = 0; i < ARRAY_SIZE(states_3); i++)
+        for (int i = 0; i < ARRAY_SIZE(states_3); i++) {
             x = states_3[i].forward(ctx, x);
+        }
     
         x = norm_3.forward(ctx, x);
         x0123.push_back(x);

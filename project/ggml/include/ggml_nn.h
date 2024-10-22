@@ -57,7 +57,7 @@ struct Linear {
     ggml_tensor_t* weight;
     ggml_tensor_t* bias = NULL;
 
-    void create_weight_tensors(ggml_context_t* ctx, ggml_type wtype = GGML_TYPE_Q8_0)
+    void create_weight_tensors(ggml_context_t* ctx, ggml_type wtype = GGML_TYPE_F16)
     {
         weight = ggml_new_tensor_2d(ctx, wtype, in_features, out_features);
         if (has_bias) {
@@ -450,7 +450,6 @@ ggml_tensor_t* ggml_nn_conv_2d(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tenso
     bool is_depthwise)
 {
     x = (is_depthwise)? ggml_conv_depthwise_2d(ctx, w, x, s0, s1, p0, p1, d0, d1) : ggml_conv_2d(ctx, w, x, s0, s1, p0, p1, d0, d1);
-
     if (b != NULL) {
         b = ggml_reshape_4d(ctx, b, 1, 1, b->ne[0], 1);
         x = ggml_add(ctx, x, b);
@@ -567,10 +566,11 @@ ggml_tensor_t* ggml_nn_mean(ggml_context_t *ctx, ggml_tensor_t *x, int dim)
     }
     x = ggml_cont(ctx, ggml_permute(ctx, x, dims[0], dims[1], dims[2], dims[3]));
     // ------------------------------------------------------------------------
-    // ggml_mean(ctx, x); // mean on dim 0
+    // x = ggml_mean(ctx, x); // mean on dim 0, xxxx_debug
     float m = (float)x->ne[0];
+    // CheckPoint("x->ne[0] = %ld, 1.0/m = %.4f", x->ne[0], 1.0/m);
     x = ggml_sum_rows(ctx, x);
-    x = ggml_scale(ctx, x, m);
+    x = ggml_scale(ctx, x, 1.0/m);
     // ------------------------------------------------------------------------
     for (int i = 0; i <= dim; i++) {
         dims[i] = (i == 0) ? dim : i - 1; // [0, 1, ..., dim] --> [dim, 0, ..., dim - 1]
