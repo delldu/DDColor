@@ -21,21 +21,31 @@ class PositionEmbedding(nn.Module):
         self.dim_t = nn.Parameter(dim_t.reshape(1, 1, 1, num_pos_feats), requires_grad=False)
         # self.register_buffer('dim_t', dim_t.reshape(1, 1, 1, num_pos_feats))
 
-        # struct ggml_tensor * ggml_arange(
-        #     struct ggml_context * ctx,
-        #     float start,
-        #     float stop,
-        #     float step)
+        self.pos_512x32x32 = nn.Parameter(self.pre_forward(torch.ones(1, 512, 32, 32)), requires_grad=False) # [1, 256, 32, 32]
+        self.pos_512x64x64 = nn.Parameter(self.pre_forward(torch.ones(1, 512, 64, 64)), requires_grad=False) # [1, 256, 64, 64]
+        self.pos_256x128x128 = nn.Parameter(self.pre_forward(torch.ones(1, 256, 128, 128)), requires_grad=False) # [1, 256, 128, 128]
 
     def forward(self, x):
+        B, C, H, W = x.size()
+        if C == 512 and H == 32 and W == 32:
+            return self.pos_512x32x32.to(x.device)
+
+        if C == 512 and H == 64 and W == 64:
+            return self.pos_512x64x64.to(x.device)
+
+        if C == 256 and H == 128 and W == 128:
+            return self.pos_256x128x128.to(x.device)
+
+        #pdb.set_trace()
+
+
+    def pre_forward(self, x):
         # x.size():  [1, 512, 32, 32] | [1, 512, 64, 64] | [1, 256, 128, 128]
         B, C, H, W = x.size()
-        # not_mask = torch.ones((x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool) # [1, 32, 32]
         not_mask = torch.ones((B, H, W), device=x.device, dtype=torch.bool) # [1, 32, 32]
-        y_embed = not_mask.cumsum(1, dtype=torch.float32)
-        x_embed = y_embed.transpose(1, 2) # not_mask.cumsum(2, dtype=torch.float32)
+        grid_x = not_mask.cumsum(1, dtype=torch.float32)
 
-        # (Pdb) y_embed.size() -- [1, 32, 32]
+        # (Pdb) grid_x.size() -- [1, 32, 32]
         # tensor([[[ 1.,  1.,  1.,  ...,  1.,  1.,  1.],
         #          [ 2.,  2.,  2.,  ...,  2.,  2.,  2.],
         #          [ 3.,  3.,  3.,  ...,  3.,  3.,  3.],
@@ -44,16 +54,19 @@ class PositionEmbedding(nn.Module):
         #          [31., 31., 31.,  ..., 31., 31., 31.],
         #          [32., 32., 32.,  ..., 32., 32., 32.]]], device='cuda:0')
 
+        grid_y = grid_x.transpose(1, 2) # not_mask.cumsum(2, dtype=torch.float32)
+
+
         # normalize:
         eps = 1e-6
-        # y_embed = y_embed / (y_embed[:, -1:, :] + eps) * self.scale
-        # x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
-        y_embed = y_embed / (H + eps) * self.scale
-        x_embed = x_embed / (W + eps) * self.scale
+        grid_x = grid_x / (H + eps) * self.scale
+        grid_y = grid_y / (W + eps) * self.scale
 
         # self.dim_t.size() -- [128]
-        pos_x = x_embed[:, :, :, None] / self.dim_t.to(x.device) # [1, 32, 32, 1] --> [1, 32, 32, 128]
-        pos_y = y_embed[:, :, :, None] / self.dim_t.to(x.device)
+        pos_x = grid_y[:, :, :, None] / self.dim_t.to(x.device) # [1, 32, 32, 1] --> [1, 32, 32, 128]
+        pos_y = grid_x[:, :, :, None] / self.dim_t.to(x.device)
+
+
         pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4).flatten(3)
         pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4).flatten(3)
 
@@ -69,5 +82,6 @@ class PositionEmbedding(nn.Module):
         # tensor [cat(pos_y, pos_x)] size: [1, 128, 128, 256], min: -1.0, max: 1.0, mean: 0.494896
         pos = torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2)
         # tensor [pos] size: [1, 256, 128, 128], min: -1.0, max: 1.0, mean: 0.494896
+
 
         return pos

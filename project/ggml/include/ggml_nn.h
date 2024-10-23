@@ -20,6 +20,8 @@ typedef struct ggml_context ggml_context_t;
 ggml_tensor_t* ggml_nn_add(ggml_context_t *ctx, ggml_tensor_t *x, float value);
 ggml_tensor_t* ggml_nn_grid_y(ggml_context_t *ctx, ggml_tensor_t *x, int h);
 ggml_tensor_t* ggml_nn_grid_x(ggml_context_t *ctx, ggml_tensor_t *x, int w);
+ggml_tensor_t* ggml_nn_arange(ggml_context_t *ctx, ggml_tensor_t *x);
+
 
 // ----------------------------------------------------------------------------------------------------------------------------------------
 // https://pytorch.org/docs/stable/generated/torch.nn.Identity.html
@@ -49,6 +51,7 @@ struct Identity {
 
 ggml_tensor_t* ggml_nn_linear(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tensor_t* w, ggml_tensor_t* b);
 
+// --------------------------------------------------------------------------
 struct Linear {
     int64_t in_features;
     int64_t out_features;
@@ -88,6 +91,7 @@ ggml_tensor_t* ggml_nn_conv_2d(ggml_context_t* ctx, ggml_tensor_t * x, ggml_tens
     ggml_tensor_t * b, int s0 /*=1*/, int s1 /*=1*/, int p0 /*=0*/, int p1 /*=0*/, int d0 /*=1*/, int d1 /*=1*/,
     bool is_depthwise);
 
+// --------------------------------------------------------------------------
 struct Conv2d {
     int64_t in_channels;
     int64_t out_channels;
@@ -169,7 +173,7 @@ struct LayerNorm {
 ggml_tensor_t* ggml_nn_batch_norm2d(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tensor_t* w, ggml_tensor_t* b, 
     ggml_tensor_t* mean, ggml_tensor_t* var, float eps);
 
-
+// --------------------------------------------------------------------------
 struct BatchNorm2d {
     int64_t num_features;
     float eps = 1e-5; // Fixed default values
@@ -264,9 +268,34 @@ struct PixelShuffle {
 
     ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x)
     {
+        x = ggml_cont(ctx, x);
         return ggml_shuffle(ctx, x, upscale_factor);
     }
 };
+
+
+ggml_tensor_t* ggml_shuffle2(ggml_context_t *ctx, ggml_tensor_t *x, int R);
+struct PixelShuffle2 {
+    int upscale_factor;
+
+    void create_weight_tensors(ggml_context_t* ctx)
+    {
+        GGML_UNUSED(ctx);
+    }
+
+    void setup_weight_names(const char* prefix)
+    {
+        GGML_UNUSED(prefix);
+    }
+
+    ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x)
+    {
+        x = ggml_cont(ctx, x);
+
+        return ggml_shuffle2(ctx, x, upscale_factor);
+    }
+};
+
 
 // ----------------------------------------------------------------------------------------------------------------------------------------
 // https://pytorch.org/docs/stable/generated/torch.nn.PixelUnshuffle.html
@@ -324,31 +353,7 @@ ggml_tensor_t* ggml_nn_slice(ggml_context_t *ctx, ggml_tensor_t *x, int dim, int
 std::vector<ggml_tensor_t *> ggml_nn_chunks(ggml_context_t *ctx, ggml_tensor_t *x, int dim, int k);
 ggml_tensor_t* ggml_nn_mul_mat(ggml_context_t *ctx, ggml_tensor_t *a, ggml_tensor_t *b);
 
-// ----------------------------------------------------------------------------------------------------------------------------------------
-// https://pytorch.org/docs/stable/generated/torch.nn.AvgPool2d.html
-// class torch.nn.AvgPool2d(kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None)
 
-ggml_tensor_t* ggml_nn_avgpool2d(ggml_context_t *ctx, ggml_tensor_t *x, int kernel_size, int stride_size);
-
-struct AvgPool2d {
-    int kernel_size = 2;
-    int stride_size = 1;
-
-    void create_weight_tensors(ggml_context_t* ctx)
-    {
-        GGML_UNUSED(ctx);
-    }
-
-    void setup_weight_names(const char* prefix)
-    {
-        GGML_UNUSED(prefix);
-    }
-
-    ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x)
-    {
-        return ggml_nn_avgpool2d(ctx, x, kernel_size, stride_size);
-    }
-};
 
 #endif // _GGML_NN_H_
 
@@ -364,7 +369,7 @@ ggml_tensor_t* ggml_nn_conv_2d(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tenso
 {
     x = (is_depthwise)? ggml_conv_depthwise_2d(ctx, w, x, s0, s1, p0, p1, d0, d1) : ggml_conv_2d(ctx, w, x, s0, s1, p0, p1, d0, d1);
     if (b != NULL) {
-        b = ggml_reshape_4d(ctx, b, 1, 1, b->ne[0], 1);
+        b = ggml_cont(ctx, ggml_reshape_4d(ctx, b, 1, 1, b->ne[0], 1));
         x = ggml_add(ctx, x, b);
     }
 
@@ -373,15 +378,16 @@ ggml_tensor_t* ggml_nn_conv_2d(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tenso
 
 ggml_tensor_t* ggml_nn_layer_norm(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tensor_t* w, ggml_tensor_t* b, float eps)
 {
-    x = ggml_norm(ctx, x, eps);
-    // ggml_tensor_t *u = ggml_nn_mean(ctx, x, 0); // dim = 0
-    // u = ggml_repeat(ctx, u, x);
-    // ggml_tensor_t *d = ggml_sub(ctx, x, u);
-    // ggml_tensor_t *s = ggml_mul(ctx, d, d);
-    // s = ggml_nn_mean(ctx, s, 0); // dim = 0
-    // s = ggml_nn_add(ctx, s, eps);
-    // s = ggml_sqrt(ctx, s);
-    // x = ggml_div(ctx, d, s);
+    // x = ggml_norm(ctx, x, eps);
+    // ------------------------------------------------
+    ggml_tensor_t *u = ggml_nn_mean(ctx, x, 0); // dim = 0
+    u = ggml_repeat(ctx, u, x);
+    ggml_tensor_t *d = ggml_sub(ctx, x, u);
+    ggml_tensor_t *s = ggml_mul(ctx, d, d);
+    s = ggml_nn_mean(ctx, s, 0); // dim = 0
+    s = ggml_nn_add(ctx, s, eps);
+    s = ggml_sqrt(ctx, s);
+    x = ggml_div(ctx, d, s);
     // ------------------------------------------------
     x = ggml_mul(ctx, x, w);
     x = ggml_add(ctx, x, b);
@@ -392,15 +398,16 @@ ggml_tensor_t* ggml_nn_batch_norm2d(ggml_context_t* ctx, ggml_tensor_t* x, ggml_
     ggml_tensor_t* mean, ggml_tensor_t* var, float eps)
 {
     int C = x->ne[2];
-    w = ggml_repeat(ctx, ggml_reshape_4d(ctx, w, 1, 1, C, 1), x);
-    b = ggml_repeat(ctx, ggml_reshape_4d(ctx, b, 1, 1, C, 1), x);
-    mean = ggml_repeat(ctx, ggml_reshape_4d(ctx, mean, 1, 1, C, 1), x);
-    var = ggml_repeat(ctx, ggml_reshape_4d(ctx, var, 1, 1, C, 1), x);
+    w = ggml_cont(ctx, ggml_reshape_4d(ctx, w, 1, 1, C, 1));
+    b = ggml_cont(ctx, ggml_reshape_4d(ctx, b, 1, 1, C, 1));
+    mean = ggml_cont(ctx, ggml_reshape_4d(ctx, mean, 1, 1, C, 1));
+    var = ggml_cont(ctx, ggml_reshape_4d(ctx, var, 1, 1, C, 1));
 
     // var += eps;
     var = ggml_nn_add(ctx, var, eps);
     var = ggml_sqrt(ctx, var);
 
+    mean = ggml_repeat(ctx, mean, x);
     x = ggml_sub(ctx, x, mean);
     x = ggml_div(ctx, x, var);
     x = ggml_mul(ctx, x, w);
@@ -435,8 +442,8 @@ ggml_tensor_t* ggml_nn_attention(ggml_context_t* ctx, ggml_tensor_t* q, ggml_ten
 ggml_tensor_t* ggml_nn_group_norm(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tensor_t* w, ggml_tensor_t* b, int num_groups)
 {
     if (ggml_n_dims(x) >= 3) {
-        w = ggml_reshape_4d(ctx, w, 1, 1, w->ne[0], 1);
-        b = ggml_reshape_4d(ctx, b, 1, 1, b->ne[0], 1);
+        w = ggml_cont(ctx, ggml_reshape_4d(ctx, w, 1, 1, w->ne[0], 1));
+        b = ggml_cont(ctx, ggml_reshape_4d(ctx, b, 1, 1, b->ne[0], 1));
     }
 
     x = ggml_group_norm(ctx, x, num_groups, 1e-6); // TODO: eps is hardcoded to 1e-6 for now
@@ -501,35 +508,6 @@ ggml_tensor_t* ggml_nn_mean(ggml_context_t *ctx, ggml_tensor_t *x, int dim)
     return x;
 }
 
-ggml_tensor_t* ggml_nn_avgpool2d(ggml_context_t *ctx, ggml_tensor_t *x, int kernel_size, int stride_size)
-{
-    ggml_tensor_t *y;
-
-    x = ggml_cont(ctx, ggml_pad(ctx, x, 1, 1, 0, 0)); // W+1, H+1, C, B
-    x = ggml_cont(ctx, x);
-
-    int W = (int)x->ne[0];
-    int H = (int)x->ne[1];
-    int C = (int)x->ne[2];
-    int B = (int)x->ne[3];
-    x = ggml_cont(ctx, ggml_reshape_3d(ctx, x, W, H, C*B));
-    // GGML_API struct ggml_tensor * ggml_pool_2d(
-    //         struct ggml_context * ctx,
-    //         struct ggml_tensor  * a,
-    //         enum ggml_op_pool     op,
-    //         int                   k0,
-    //         int                   k1,
-    //         int                   s0,
-    //         int                   s1,
-    //         float                 p0,
-    //         float                 p1);
-    y = ggml_cont(ctx, ggml_pool_2d(ctx, x, GGML_OP_POOL_AVG, kernel_size, kernel_size, stride_size, stride_size, 1, 1));
-    y = ggml_cont(ctx, ggml_reshape_4d(ctx, y, W + 1, H + 1, C, B));
-    y = ggml_nn_slice(ctx, y, 0 /*dim*/, 1 /*start*/, W /*stop*/, 1 /*step*/);
-    y = ggml_nn_slice(ctx, y, 1 /*dim*/, 1 /*start*/, H /*stop*/, 1 /*step*/);
-
-    return y;
-}
 
 // ggml_tensor_t* ggml_nn_slice(ggml_context_t *ctx, ggml_tensor_t *x, int dim, int start /*0*/, int stop /*x->ne[dim]*/, int step /*1*/);
 ggml_tensor_t* ggml_nn_slice(ggml_context_t *ctx, ggml_tensor_t *x, int dim, int start, int stop, int step)
@@ -633,5 +611,57 @@ ggml_tensor_t* ggml_nn_grid_x(ggml_context_t *ctx, ggml_tensor_t *x, int w)
     return ggml_cont(ctx, y);
 }
 
+
+void shuffle_map_function(struct ggml_tensor * dst , const struct ggml_tensor * a, const struct ggml_tensor * x, int ith, int nth, void * userdata)
+{
+    int R = (int)dst->ne[0]/x->ne[0];
+
+    int W = (int)dst->ne[0];
+    int H = (int)dst->ne[1];
+    int C = (int)dst->ne[2];
+    int B = (int)dst->ne[3];
+
+    // assert(ggml_is_contiguous(dst));
+    // assert(ggml_is_contiguous(x));
+
+    for (int d_w = 0; d_w < W; d_w++) {
+        for (int d_h = 0; d_h < H; d_h++) {
+            for (int d_c = 0; d_c < C; d_c++) {
+                int s_c = d_c * R * R + (d_h % R) * R + (d_w % R);
+                for (int d_b = 0; d_b < B; d_b++) {
+                    float value = ggml_get_f32_nd(x, d_w/R, d_h/R, s_c, d_b);
+                    ggml_set_f32_nd(dst, d_w, d_h, d_c, d_b, value);
+                }
+            }
+        }
+    }    
+}
+
+// convert x from (∗,C*r*2, H, W) to (∗, C, H*r, W*r)
+ggml_tensor_t* ggml_shuffle2(ggml_context_t *ctx, ggml_tensor_t *x, int R)
+{
+    int W = (int)x->ne[0];
+    int H = (int)x->ne[1];
+    int C = (int)x->ne[2];
+    int B = (int)x->ne[3];
+    ggml_tensor_t *a = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, W * R, H * R, C/R/R, B);
+
+    // Info: ab512x512_output Tensor: 1x2x512x512
+    // min: -0.2172, max: 18.2802, mean: 2.6995
+    // 2.9144 3.3102 3.4971 4.6417 4.7460 3.7708 3.5458 4.0235 4.0816 3.2961 ... 0.5322 0.6510 0.5331 0.5985 0.9907 1.4848 1.6555 1.7430 2.3764 1.3851 
+
+    return ggml_map_custom2(ctx, a, x, shuffle_map_function, GGML_N_TASKS_MAX, NULL);
+}
+
+ggml_tensor_t* ggml_nn_arange(ggml_context_t *ctx, ggml_tensor_t *x)
+{
+    int n = (int)ggml_nelements(x);
+
+    ggml_tensor_t *a = ggml_arange(ctx, 0.0, (float)n, 1.0);
+    a = ggml_scale(ctx, a, 1.0/(float)n);
+    x = ggml_cont(ctx, ggml_reshape_4d(ctx, a, x->ne[0], x->ne[1], x->ne[2], x->ne[3])); // !!! ggml_cont !!!
+
+    return x;
+}
 
 #endif // GGML_NN_IMPLEMENTATION

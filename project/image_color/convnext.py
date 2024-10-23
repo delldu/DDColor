@@ -35,14 +35,23 @@ class Block(nn.Module):
         x = x.permute(0, 2, 3, 1) # (N, C, H, W) -> (N, H, W, C)
 
         x = self.norm(x)
+
+        # x.size() -- [1, 128, 128, 192]
+        # self.pwconv1.weight.size() -- [768, 192]
+        # self.pwconv1.bias.size() -- [768]
         x = self.pwconv1(x)
+
+        # x.size() -- [1, 128, 128, 768]
         x = self.act(x)
         x = self.pwconv2(x)
 
+        # self.gamma.size() -- [192]
+        # x.size() -- [1, 128, 128, 192]
         x = self.gamma * x
-        x = x.permute(0, 3, 1, 2) # (N, H, W, C) -> (N, C, H, W)
 
+        x = x.permute(0, 3, 1, 2) # (N, H, W, C) -> (N, C, H, W)
         x = x + input
+
         return x
 
 class ConvNeXt(nn.Module):
@@ -95,14 +104,24 @@ class ConvNeXt(nn.Module):
 
 
     def forward(self, x) -> ENCODER_RESULT:
-        # tensor [x] size: [1, 3, 512, 512], min: -4.686537, max: 4.506181, mean: -0.000415
+        # tensor [x] size: [1, 3, 512, 512], min: -2.117904, max: 2.326308, mean: -0.356781
 
         # encoder_layers: List[torch.Tensor] = []
         x0 = x1 = x2 = x3 = x
         i = 0
         for (ds, st) in zip(self.downsample_layers, self.stages):
             x = ds(x)
+
+            # tensor [x] size: [1, 192, 128, 128], min: -6.796315, max: 7.445028, mean: -0.00847
+            # tensor [x] size: [1, 384, 64, 64], min: -10.776752, max: 11.803871, mean: 0.029293
+            # tensor [x] size: [1, 768, 32, 32], min: -11.667679, max: 21.679581, mean: 0.021038
+            # tensor [x] size: [1, 1536, 16, 16], min: -69.043289, max: 41.44706, mean: 0.014986
+
             x = st(x)
+            # tensor [x] size: [1, 192, 128, 128], min: -64.94043, max: 29.835566, mean: -0.141978
+            # tensor [x] size: [1, 384, 64, 64], min: -441.199127, max: 321.276184, mean: 0.16742
+            # tensor [x] size: [1, 768, 32, 32], min: -352.428223, max: 3769.557617, mean: 1.493006
+            # tensor [x] size: [1, 1536, 16, 16], min: -427.998962, max: 218.897659, mean: -0.037601
 
             # self.norm0/1/2/3
             if i == 0:

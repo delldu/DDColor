@@ -8,6 +8,13 @@ import todos
 
 import pdb
 
+def torch_nn_arange3(x):
+    B, C, H = x.size()
+    a = torch.arange(x.nelement())/x.nelement()
+    a = a.to(x.device)
+    return a.view(B, C, H)
+
+
 def in_projection_packed(q, k, v, w, b) -> List[torch.Tensor]:
     # w.size() -- [1536, 512]
     # b.size() -- [1536]
@@ -97,6 +104,12 @@ class MultiheadAttention(nn.Module):
             self.out_proj.weight, 
             self.out_proj.bias,
         )
+
+        # query = torch_nn_arange3(query)
+        # key = torch_nn_arange3(key)
+        # value = torch_nn_arange3(value)
+        # todos.debug.output_var("attn_output -------", attn_output)
+
         return attn_output # [100, 1, 256]
 
     def extra_repr(self) -> str:
@@ -116,11 +129,16 @@ class SelfAttentionLayer(nn.Module):
         return tensor + query_pos
 
     def forward(self, tgt, query_pos):
+        # tensor [tgt] size: [100, 1, 256], min: -3.342127, max: 3.732216, mean: -0.000128
+        # tensor [query_pos] size: [100, 1, 256], min: -3.593544, max: 3.98427, mean: 0.010172
         q = k = self.with_pos_embed(tgt, query_pos)
+        # tensor [q] size: [100, 1, 256], min: -4.91743, max: 4.772821, mean: 0.010043
+        # tensor [k] size: [100, 1, 256], min: -4.91743, max: 4.772821, mean: 0.010043
         tgt2 = self.self_attn(q, k, value=tgt)
-        # tgt = tgt + self.dropout(tgt2)
+        # tensor [tgt2] size: [100, 1, 256], min: -1.054467, max: 1.044858, mean: 0.023542
         tgt = tgt + tgt2
         tgt = self.norm(tgt)
+        # tensor [tgt] size: [100, 1, 256], min: -3.489547, max: 3.75111, mean: -2.2e-05
 
         return tgt
 
@@ -165,12 +183,14 @@ class FFNLayer(nn.Module):
         return tensor + pos
 
     def forward(self, tgt):
-        # tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt))))
-        # tgt = tgt + self.dropout(tgt2)
         tgt2 = self.linear2(F.relu(self.linear1(tgt)))
         tgt = tgt + tgt2
-
         tgt = self.norm(tgt)
+        # --------------------------------------------------------------------------------
+        # tensor [tgt2] size: [100, 1, 256], min: -1.949435, max: 2.415847, mean: -0.00953
+        # tensor [tgt] size: [100, 1, 256], min: -3.249837, max: 3.623069, mean: 3.5e-05
+        # --------------------------------------------------------------------------------
+
         return tgt
 
 class MLP(nn.Module):
@@ -198,4 +218,5 @@ class MLP(nn.Module):
             if i < self.num_layers - 1:
                 x = F.relu(x)
 
+        # todos.debug.output_var("mlp -------", x)
         return x

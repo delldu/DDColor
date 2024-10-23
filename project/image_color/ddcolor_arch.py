@@ -18,6 +18,12 @@ from ggml_engine import create_network
 # [norm0, norm1, norm2, norm3]
 ENCODER_RESULT = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 
+def torch_nn_arange(x):
+    B, C, H, W = x.size()
+    a = torch.arange(x.nelement())/x.nelement()
+    a = a.to(x.device)
+    return a.view(B, C, H, W)
+
 class DDColor(nn.Module):
     def __init__(self,
                  num_input_channels=3,
@@ -73,6 +79,8 @@ class DDColor(nn.Module):
 
     def forward(self, x):
         assert x.size(2) == 512 and x.size(3) == 512, "Please input 1x3x512x512 tensor"
+        # tensor [x] size: [1, 3, 512, 512], min: 0.0, max: 0.929419, mean: 0.368175
+
         x = self.normalize(x)
         # tensor [x] size: [1, 3, 512, 512], min: -2.117904, max: 2.326308, mean: -0.356781
         
@@ -275,6 +283,10 @@ class MultiScaleColorDecoder(nn.Module):
         #     tensor [item] size: [1, 512, 64, 64], min: -2.632989, max: 835685120.0, mean: 68049544.0
         #     tensor [item] size: [1, 256, 128, 128], min: -2.94301, max: 1553683709952.0, mean: 143206252544.0
         # tensor [img_features] size: [1, 256, 512, 512], min: 0.0, max: 222161108992.0, mean: 1800433664.0
+        # x[0] = torch_nn_arange(x[0])
+        # x[1] = torch_nn_arange(x[1])
+        # x[2] = torch_nn_arange(x[2])
+        # img_features = torch_nn_arange(img_features)
 
         src = []
         pos = []
@@ -282,15 +294,37 @@ class MultiScaleColorDecoder(nn.Module):
             # x[0].size() -- [1, 512, 32, 32]
             # self.pe_layer(x[0]).size() -- [1, 256, 32, 32]
             # self.pe_layer(x[0]).flatten(2).size() -- [1, 256, 1024]
+
+            # print("-" * 80)
+            # todos.debug.output_var("pos_temp1", self.pe_layer(x[i]).flatten(2))
             pos_temp = self.pe_layer(x[i]).flatten(2).permute(2, 0, 1) # [1024, 1, 256]
+            # todos.debug.output_var("pos_temp", pos_temp)
 
             # self.level_embed.weight.size() -- [3, 256]
             src_temp = layer(x[i]).flatten(2) + self.level_embed.weight[i][None, :, None]
             # [1, 256, 32, 32] --> [1, 256, 1024] + [1, 256, 1]
+            # todos.debug.output_var("src_temp1", src_temp)
             src_temp = src_temp.permute(2, 0, 1)
+            # todos.debug.output_var("src_temp2", src_temp)
 
             pos.append(pos_temp)
             src.append(src_temp)
+
+        # --------------------------------------------------------------------------------
+        # tensor [pos_temp1] size: [1, 256, 1024], min: -1.0, max: 1.0, mean: 0.494228
+        # tensor [pos_temp2] size: [1024, 1, 256], min: -1.0, max: 1.0, mean: 0.494228
+        # tensor [src_temp1] size: [1, 256, 1024], min: -11.04214, max: 12.239643, mean: 0.041581
+        # tensor [src_temp2] size: [1024, 1, 256], min: -11.04214, max: 12.239643, mean: 0.041581
+        # --------------------------------------------------------------------------------
+        # tensor [pos_temp1] size: [1, 256, 4096], min: -1.0, max: 1.0, mean: 0.494677
+        # tensor [pos_temp2] size: [4096, 1, 256], min: -1.0, max: 1.0, mean: 0.494677
+        # tensor [src_temp1] size: [1, 256, 4096], min: -9.525273, max: 8.871307, mean: -0.093536
+        # tensor [src_temp2] size: [4096, 1, 256], min: -9.525273, max: 8.871307, mean: -0.093536
+        # --------------------------------------------------------------------------------
+        # tensor [pos_temp1] size: [1, 256, 16384], min: -1.0, max: 1.0, mean: 0.494896
+        # tensor [pos_temp2] size: [16384, 1, 256], min: -1.0, max: 1.0, mean: 0.494896
+        # tensor [src_temp1] size: [1, 256, 16384], min: -8.290808, max: 7.74903, mean: -0.018584
+        # tensor [src_temp2] size: [16384, 1, 256], min: -8.290808, max: 7.74903, mean: -0.018584
 
         bs = src[0].shape[1] # src[0].shape -- [1024, 1, 256] ==> 1
 
@@ -310,8 +344,69 @@ class MultiScaleColorDecoder(nn.Module):
             output = self_layer(output, query_pos=query_embed)
             # FFN
             output = ffn_layer(output)
+            # print("=" * 80)
+            # todos.debug.output_var("query_embed", query_embed)
+            # todos.debug.output_var("src", src[level_index])
+            # todos.debug.output_var("pos", pos[level_index])
+            # todos.debug.output_var("output", output)
+            # print("=" * 80)
+
             i = i + 1
 
+        # ================================================================================
+        # tensor [query_embed] size: [100, 1, 256], min: -3.593544, max: 3.98427, mean: 0.010172
+        # tensor [src] size: [1024, 1, 256], min: -11.04214, max: 12.239643, mean: 0.041581
+        # tensor [pos] size: [1024, 1, 256], min: -1.0, max: 1.0, mean: 0.494228
+        # tensor [output] size: [100, 1, 256], min: -3.249837, max: 3.623069, mean: 3.5e-05
+        # ================================================================================
+        # ================================================================================
+        # tensor [query_embed] size: [100, 1, 256], min: -3.593544, max: 3.98427, mean: 0.010172
+        # tensor [src] size: [4096, 1, 256], min: -9.525273, max: 8.871307, mean: -0.093536
+        # tensor [pos] size: [4096, 1, 256], min: -1.0, max: 1.0, mean: 0.494677
+        # tensor [output] size: [100, 1, 256], min: -2.732033, max: 2.836753, mean: -1.1e-05
+        # ================================================================================
+        # ================================================================================
+        # tensor [query_embed] size: [100, 1, 256], min: -3.593544, max: 3.98427, mean: 0.010172
+        # tensor [src] size: [16384, 1, 256], min: -8.290808, max: 7.74903, mean: -0.018584
+        # tensor [pos] size: [16384, 1, 256], min: -1.0, max: 1.0, mean: 0.494896
+        # tensor [output] size: [100, 1, 256], min: -2.466632, max: 3.070642, mean: 0.000379
+        # ================================================================================
+        # ================================================================================
+        # tensor [query_embed] size: [100, 1, 256], min: -3.593544, max: 3.98427, mean: 0.010172
+        # tensor [src] size: [1024, 1, 256], min: -11.04214, max: 12.239643, mean: 0.041581
+        # tensor [pos] size: [1024, 1, 256], min: -1.0, max: 1.0, mean: 0.494228
+        # tensor [output] size: [100, 1, 256], min: -2.353627, max: 2.698818, mean: 0.0001
+        # ================================================================================
+        # ================================================================================
+        # tensor [query_embed] size: [100, 1, 256], min: -3.593544, max: 3.98427, mean: 0.010172
+        # tensor [src] size: [4096, 1, 256], min: -9.525273, max: 8.871307, mean: -0.093536
+        # tensor [pos] size: [4096, 1, 256], min: -1.0, max: 1.0, mean: 0.494677
+        # tensor [output] size: [100, 1, 256], min: -4.34586, max: 2.735583, mean: -0.000341
+        # ================================================================================
+        # ================================================================================
+        # tensor [query_embed] size: [100, 1, 256], min: -3.593544, max: 3.98427, mean: 0.010172
+        # tensor [src] size: [16384, 1, 256], min: -8.290808, max: 7.74903, mean: -0.018584
+        # tensor [pos] size: [16384, 1, 256], min: -1.0, max: 1.0, mean: 0.494896
+        # tensor [output] size: [100, 1, 256], min: -3.83156, max: 1.828789, mean: -0.000992
+        # ================================================================================
+        # ================================================================================
+        # tensor [query_embed] size: [100, 1, 256], min: -3.593544, max: 3.98427, mean: 0.010172
+        # tensor [src] size: [1024, 1, 256], min: -11.04214, max: 12.239643, mean: 0.041581
+        # tensor [pos] size: [1024, 1, 256], min: -1.0, max: 1.0, mean: 0.494228
+        # tensor [output] size: [100, 1, 256], min: -4.883458, max: 3.707949, mean: 8.8e-05
+        # ================================================================================
+        # ================================================================================
+        # tensor [query_embed] size: [100, 1, 256], min: -3.593544, max: 3.98427, mean: 0.010172
+        # tensor [src] size: [4096, 1, 256], min: -9.525273, max: 8.871307, mean: -0.093536
+        # tensor [pos] size: [4096, 1, 256], min: -1.0, max: 1.0, mean: 0.494677
+        # tensor [output] size: [100, 1, 256], min: -4.112357, max: 6.345003, mean: 0.003334
+        # ================================================================================
+        # ================================================================================
+        # tensor [query_embed] size: [100, 1, 256], min: -3.593544, max: 3.98427, mean: 0.010172
+        # tensor [src] size: [16384, 1, 256], min: -8.290808, max: 7.74903, mean: -0.018584
+        # tensor [pos] size: [16384, 1, 256], min: -1.0, max: 1.0, mean: 0.494896
+        # tensor [output] size: [100, 1, 256], min: -4.890996, max: 5.43468, mean: -0.002526
+        # ================================================================================
         # output.size() -- [100, 1, 256]
         decoder_output = self.decoder_norm(output) # size() -- [100, 1, 256]
         decoder_output = decoder_output.transpose(0, 1)  # size() -- [1, 100, 256]
@@ -321,5 +416,7 @@ class MultiScaleColorDecoder(nn.Module):
         # tensor [color_embed] size: [1, 100, 256], min: -32.289177, max: 50.403393, mean: 0.213315
         # tensor [img_features] size: [1, 256, 512, 512], min: 0.0, max: 0.285963, mean: 0.009585
         # tensor [out] size: [1, 100, 512, 512], min: -14.656635, max: 24.051313, mean: 1.814844
+
+        todos.debug.output_var("out ----------", out)
 
         return out # size() -- [1, 100, 512, 512]
