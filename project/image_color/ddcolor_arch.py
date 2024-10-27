@@ -93,11 +93,15 @@ class DDColor(nn.Module):
         #     tensor [item] size: [1, 1536, 16, 16], min: -26.544884, max: 16.26297, mean: -0.00155
 
         out_feat = self.decoder(encoder_layers)
+
         coarse_input = torch.cat([out_feat, x], dim=1)
         out_ab = self.refine_net(coarse_input)
         # tensor [out_feat] size: [1, 100, 512, 512], min: -14.656635, max: 24.051313, mean: 1.814844
         # tensor [coarse_input] size: [1, 103, 512, 512], min: -14.656635, max: 24.051313, mean: 1.751593
         # tensor [out_ab] size: [1, 2, 512, 512], min: -41.829132, max: 52.045349, mean: 4.471401
+
+
+        todos.debug.output_var("out_ab", out_ab)
 
         return out_ab
 
@@ -164,6 +168,7 @@ class Decoder(nn.Module):
         #     tensor [item] size: [1, 1536, 16, 16], min: -26.544884, max: 16.26297, mean: -0.00155
 
         (x0, x1, x2, x3) = encoder_output_layers
+
         out0 = self.layer_output(0, x3, x2)
         # tensor [out0] size: [1, 512, 32, 32], min: -2.069555, max: 33.400291, mean: -0.006212
 
@@ -283,10 +288,6 @@ class MultiScaleColorDecoder(nn.Module):
         #     tensor [item] size: [1, 512, 64, 64], min: -2.632989, max: 835685120.0, mean: 68049544.0
         #     tensor [item] size: [1, 256, 128, 128], min: -2.94301, max: 1553683709952.0, mean: 143206252544.0
         # tensor [img_features] size: [1, 256, 512, 512], min: 0.0, max: 222161108992.0, mean: 1800433664.0
-        # x[0] = torch_nn_arange(x[0])
-        # x[1] = torch_nn_arange(x[1])
-        # x[2] = torch_nn_arange(x[2])
-        # img_features = torch_nn_arange(img_features)
 
         src = []
         pos = []
@@ -295,36 +296,15 @@ class MultiScaleColorDecoder(nn.Module):
             # self.pe_layer(x[0]).size() -- [1, 256, 32, 32]
             # self.pe_layer(x[0]).flatten(2).size() -- [1, 256, 1024]
 
-            # print("-" * 80)
-            # todos.debug.output_var("pos_temp1", self.pe_layer(x[i]).flatten(2))
             pos_temp = self.pe_layer(x[i]).flatten(2).permute(2, 0, 1) # [1024, 1, 256]
-            # todos.debug.output_var("pos_temp", pos_temp)
 
             # self.level_embed.weight.size() -- [3, 256]
             src_temp = layer(x[i]).flatten(2) + self.level_embed.weight[i][None, :, None]
             # [1, 256, 32, 32] --> [1, 256, 1024] + [1, 256, 1]
-            # todos.debug.output_var("src_temp1", src_temp)
             src_temp = src_temp.permute(2, 0, 1)
-            # todos.debug.output_var("src_temp2", src_temp)
 
             pos.append(pos_temp)
             src.append(src_temp)
-
-        # --------------------------------------------------------------------------------
-        # tensor [pos_temp1] size: [1, 256, 1024], min: -1.0, max: 1.0, mean: 0.494228
-        # tensor [pos_temp2] size: [1024, 1, 256], min: -1.0, max: 1.0, mean: 0.494228
-        # tensor [src_temp1] size: [1, 256, 1024], min: -11.04214, max: 12.239643, mean: 0.041581
-        # tensor [src_temp2] size: [1024, 1, 256], min: -11.04214, max: 12.239643, mean: 0.041581
-        # --------------------------------------------------------------------------------
-        # tensor [pos_temp1] size: [1, 256, 4096], min: -1.0, max: 1.0, mean: 0.494677
-        # tensor [pos_temp2] size: [4096, 1, 256], min: -1.0, max: 1.0, mean: 0.494677
-        # tensor [src_temp1] size: [1, 256, 4096], min: -9.525273, max: 8.871307, mean: -0.093536
-        # tensor [src_temp2] size: [4096, 1, 256], min: -9.525273, max: 8.871307, mean: -0.093536
-        # --------------------------------------------------------------------------------
-        # tensor [pos_temp1] size: [1, 256, 16384], min: -1.0, max: 1.0, mean: 0.494896
-        # tensor [pos_temp2] size: [16384, 1, 256], min: -1.0, max: 1.0, mean: 0.494896
-        # tensor [src_temp1] size: [1, 256, 16384], min: -8.290808, max: 7.74903, mean: -0.018584
-        # tensor [src_temp2] size: [16384, 1, 256], min: -8.290808, max: 7.74903, mean: -0.018584
 
         bs = src[0].shape[1] # src[0].shape -- [1024, 1, 256] ==> 1
 
@@ -344,12 +324,6 @@ class MultiScaleColorDecoder(nn.Module):
             output = self_layer(output, query_pos=query_embed)
             # FFN
             output = ffn_layer(output)
-            # print("=" * 80)
-            # todos.debug.output_var("query_embed", query_embed)
-            # todos.debug.output_var("src", src[level_index])
-            # todos.debug.output_var("pos", pos[level_index])
-            # todos.debug.output_var("output", output)
-            # print("=" * 80)
 
             i = i + 1
 
@@ -409,14 +383,15 @@ class MultiScaleColorDecoder(nn.Module):
         # ================================================================================
         # output.size() -- [100, 1, 256]
         decoder_output = self.decoder_norm(output) # size() -- [100, 1, 256]
-        decoder_output = decoder_output.transpose(0, 1)  # size() -- [1, 100, 256]
+        decoder_output = decoder_output.transpose(0, 1)  # [100, 1, 256] --> [1, 100, 256]
+
         color_embed = self.color_embed(decoder_output)
+
         out = torch.einsum("bqc,bchw->bqhw", color_embed, img_features) # ggml_debug
 
         # tensor [color_embed] size: [1, 100, 256], min: -32.289177, max: 50.403393, mean: 0.213315
         # tensor [img_features] size: [1, 256, 512, 512], min: 0.0, max: 0.285963, mean: 0.009585
         # tensor [out] size: [1, 100, 512, 512], min: -14.656635, max: 24.051313, mean: 1.814844
 
-        todos.debug.output_var("out ----------", out)
 
         return out # size() -- [1, 100, 512, 512]

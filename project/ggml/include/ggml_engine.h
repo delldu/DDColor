@@ -257,7 +257,7 @@ int GGMLNetwork::m_network_init()
     int64_t start_time = ggml_time_ms();
 
     // Set default threads
-    eng->cpu_threads = std::thread::hardware_concurrency();
+    eng->cpu_threads = 1; // std::thread::hardware_concurrency();
     // Get num of tensors and memoy size via temp context for more presion
     {
         // ggml_tensor_overhead() == 400

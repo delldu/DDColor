@@ -5,9 +5,10 @@
 #define GGML_NN_IMPLEMENTATION
 #include <ggml_nn.h>
 
+// !!! ------------------------------------------------
 ggml_tensor_t* ggml_nn_avgpool2d(ggml_context_t *ctx, ggml_tensor_t *x, int kernel_size, int stride_size)
 {
-    x = ggml_pad(ctx, x, 1, 1, 0, 0); // W+1, H+1, C, B
+    x = ggml_replication_pad2d(ctx, x, 1, 0, 1, 0); // left, right, top, bottom
 
     int W = (int)x->ne[0];
     int H = (int)x->ne[1];

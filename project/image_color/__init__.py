@@ -33,7 +33,7 @@ def get_ddcolor_model():
     if 'cpu' in str(device.type):
         model.float()
 
-    # print(f"Running on {device} ...")
+    print(f"Running on {device} ...")
     # # make sure model good for C/C++
     # model = torch.jit.script(model)
     # # https://github.com/pytorch/pytorch/issues/52286

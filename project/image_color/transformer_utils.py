@@ -156,9 +156,9 @@ class CrossAttentionLayer(nn.Module):
 
     def forward(self, tgt, memory, pos, query_pos):
         # tensor [tgt] size: [100, 1, 256], min: -3.530838, max: 3.635915, mean: -0.000685
+        # tensor [query_pos] size: [100, 1, 256], min: -3.593544, max: 3.98427, mean: 0.010172
         # tensor [memory] size: [1024, 1, 256], min: -11.04214, max: 12.239643, mean: 0.041581
         # tensor [pos] size: [1024, 1, 256], min: -1.0, max: 1.0, mean: 0.494228
-        # tensor [query_pos] size: [100, 1, 256], min: -3.593544, max: 3.98427, mean: 0.010172
         tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory)

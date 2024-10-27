@@ -18,6 +18,13 @@ from ggml_engine import create_network
 # [norm0, norm1, norm2, norm3]
 ENCODER_RESULT = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 
+def torch_nn_arange(x):
+    B, C, H, W = x.size()
+    a = torch.arange(x.nelement())/x.nelement()
+    a = a.to(x.device)
+    return a.view(B, C, H, W)
+
+
 class Block(nn.Module):
     def __init__(self, dim, layer_scale_init_value=1e-6):
         super().__init__()
@@ -30,6 +37,8 @@ class Block(nn.Module):
         self.gamma = nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=False)
 
     def forward(self, x):
+        # x = torch_nn_arange(x)
+
         input = x
         x = self.dwconv(x)
         x = x.permute(0, 2, 3, 1) # (N, C, H, W) -> (N, H, W, C)
@@ -51,6 +60,8 @@ class Block(nn.Module):
 
         x = x.permute(0, 3, 1, 2) # (N, H, W, C) -> (N, C, H, W)
         x = x + input
+
+        # todos.debug.output_var("----Block", x)
 
         return x
 

@@ -109,8 +109,6 @@ def export_onnx_model():
     onnx_model = onnx.load(onnx_filename)
     onnx.checker.check_model(onnx_model)
 
-    pdb.set_trace()
-
     # TypeError: arr must be of type np.generic or np.ndarray, got <class 'list'>
     onnx_model, check = simplify(onnx_model)
     assert check, "Simplified ONNX model could not be validated"

@@ -4,6 +4,11 @@ from torch.nn import functional as F
 import todos
 import pdb
 
+def torch_nn_arange(x):
+    B, C, H, W = x.size()
+    a = torch.arange(x.nelement())/x.nelement()
+    a = a.to(x.device)
+    return a.view(B, C, H, W)
 
 def custom_conv_layer(ni, nf,
     ks = 3,
@@ -48,9 +53,15 @@ class CustomPixelShuffle(nn.Module):
         self.blur = nn.AvgPool2d(2, stride=1)
         self.relu = nn.ReLU(True)
 
+
     def forward(self, x):
-        x = self.shuf(self.relu(self.conv(x)))
-        return self.blur(self.pad(x))
+        x = self.relu(self.conv(x))
+
+        x = self.shuf(x)
+
+        x = self.blur(self.pad(x))
+        
+        return x
 
 
 class UnetBlockWide(nn.Module):

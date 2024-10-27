@@ -51,7 +51,7 @@ struct Identity {
 
 ggml_tensor_t* ggml_nn_linear(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tensor_t* w, ggml_tensor_t* b);
 
-// --------------------------------------------------------------------------
+// !!! -----------------------------------------------------------------------
 struct Linear {
     int64_t in_features;
     int64_t out_features;
@@ -141,6 +141,7 @@ struct Conv2d {
 
 ggml_tensor_t* ggml_nn_layer_norm(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tensor_t* w, ggml_tensor_t* b, float eps);
 
+// !!! -----------------------------------------------------------------------
 struct LayerNorm {
     int64_t normalized_shape;
     float eps = 1e-5; // Fixed default values
@@ -173,7 +174,7 @@ struct LayerNorm {
 ggml_tensor_t* ggml_nn_batch_norm2d(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tensor_t* w, ggml_tensor_t* b, 
     ggml_tensor_t* mean, ggml_tensor_t* var, float eps);
 
-// --------------------------------------------------------------------------
+// !!! -----------------------------------------------------------------------
 struct BatchNorm2d {
     int64_t num_features;
     float eps = 1e-5; // Fixed default values
@@ -253,6 +254,7 @@ ggml_tensor_t* ggml_nn_attention(ggml_context_t* ctx, ggml_tensor_t* q, ggml_ten
 // https://paperswithcode.com/method/pixelshuffle
 // class torch.nn.PixelShuffle(upscale_factor)[source] -- convert x from (∗,C*r*2, H, W) to (∗, C, H*r, W*r)
 
+// !!! --------------------------------------------------------------------------
 struct PixelShuffle {
     int upscale_factor;
 
@@ -380,17 +382,19 @@ ggml_tensor_t* ggml_nn_layer_norm(ggml_context_t* ctx, ggml_tensor_t* x, ggml_te
 {
     // x = ggml_norm(ctx, x, eps);
     // ------------------------------------------------
-    ggml_tensor_t *u = ggml_nn_mean(ctx, x, 0); // dim = 0
-    u = ggml_repeat(ctx, u, x);
+    ggml_tensor_t *u = ggml_mean(ctx, x); // ggml_nn_mean(ctx, x, 0); // dim = 0
+    // u = ggml_repeat(ctx, u, x);
     ggml_tensor_t *d = ggml_sub(ctx, x, u);
+
     ggml_tensor_t *s = ggml_mul(ctx, d, d);
-    s = ggml_nn_mean(ctx, s, 0); // dim = 0
+    s = ggml_mean(ctx, s); // ggml_nn_mean(ctx, s, 0); // dim = 0
     s = ggml_nn_add(ctx, s, eps);
     s = ggml_sqrt(ctx, s);
     x = ggml_div(ctx, d, s);
     // ------------------------------------------------
     x = ggml_mul(ctx, x, w);
     x = ggml_add(ctx, x, b);
+
     return x;
 }
 
@@ -400,9 +404,9 @@ ggml_tensor_t* ggml_nn_batch_norm2d(ggml_context_t* ctx, ggml_tensor_t* x, ggml_
     int C = x->ne[2];
     w = ggml_cont(ctx, ggml_reshape_4d(ctx, w, 1, 1, C, 1));
     b = ggml_cont(ctx, ggml_reshape_4d(ctx, b, 1, 1, C, 1));
+
     mean = ggml_cont(ctx, ggml_reshape_4d(ctx, mean, 1, 1, C, 1));
     var = ggml_cont(ctx, ggml_reshape_4d(ctx, var, 1, 1, C, 1));
-
     // var += eps;
     var = ggml_nn_add(ctx, var, eps);
     var = ggml_sqrt(ctx, var);
@@ -495,10 +499,10 @@ ggml_tensor_t* ggml_nn_mean(ggml_context_t *ctx, ggml_tensor_t *x, int dim)
     }
     x = ggml_cont(ctx, ggml_permute(ctx, x, dims[0], dims[1], dims[2], dims[3]));
     // ------------------------------------------------------------------------
-    // x = ggml_mean(ctx, x); // mean on dim 0, xxxx_debug
-    float m = (float)x->ne[0];
-    x = ggml_sum_rows(ctx, x);
-    x = ggml_scale(ctx, x, 1.0/m);
+    x = ggml_mean(ctx, x); // mean on dim 0, xxxx_debug
+    // float m = (float)x->ne[0];
+    // x = ggml_cont(ctx, ggml_sum_rows(ctx, x));
+    // x = ggml_scale(ctx, x, 1.0/m);
     // ------------------------------------------------------------------------
     for (int i = 0; i <= dim; i++) {
         dims[i] = (i == 0) ? dim : i - 1; // [0, 1, ..., dim] --> [dim, 0, ..., dim - 1]
