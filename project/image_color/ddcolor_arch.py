@@ -83,9 +83,12 @@ class DDColor(nn.Module):
 
         x = self.normalize(x)
         # tensor [x] size: [1, 3, 512, 512], min: -2.117904, max: 2.326308, mean: -0.356781
+        todos.debug.output_var("normalize(x)", x)
         
         # How Avoiding Pitfalls in onnx exporting ??? !!!
         encoder_layers: ENCODER_RESULT = self.encoder(x)
+        todos.debug.output_var("encoder_layers", encoder_layers)
+
         # encoder_layers is tuple: len = 4
         #     tensor [item] size: [1, 192, 128, 128], min: -10.815851, max: 5.158478, mean: -0.007829
         #     tensor [item] size: [1, 384, 64, 64], min: -13.253959, max: 16.581171, mean: -0.000148
@@ -93,15 +96,20 @@ class DDColor(nn.Module):
         #     tensor [item] size: [1, 1536, 16, 16], min: -26.544884, max: 16.26297, mean: -0.00155
 
         out_feat = self.decoder(encoder_layers)
+        todos.debug.output_var("out_feat", out_feat)
 
         coarse_input = torch.cat([out_feat, x], dim=1)
         out_ab = self.refine_net(coarse_input)
-        # tensor [out_feat] size: [1, 100, 512, 512], min: -14.656635, max: 24.051313, mean: 1.814844
-        # tensor [coarse_input] size: [1, 103, 512, 512], min: -14.656635, max: 24.051313, mean: 1.751593
-        # tensor [out_ab] size: [1, 2, 512, 512], min: -41.829132, max: 52.045349, mean: 4.471401
-
-
         todos.debug.output_var("out_ab", out_ab)
+
+        # tensor [normalize(x)] size: [1, 3, 512, 512], min: -2.117904, max: 2.326308, mean: -0.356781
+        # encoder_layers is tuple: len = 4
+        #     tensor [item] size: [1, 192, 128, 128], min: -10.815851, max: 5.158478, mean: -0.007829
+        #     tensor [item] size: [1, 384, 64, 64], min: -13.253959, max: 16.581171, mean: -0.000148
+        #     tensor [item] size: [1, 768, 32, 32], min: -6.887635, max: 24.325577, mean: 0.001135
+        #     tensor [item] size: [1, 1536, 16, 16], min: -26.544884, max: 16.26297, mean: -0.00155
+        # tensor [out_feat] size: [1, 100, 512, 512], min: -14.656634, max: 24.051313, mean: 1.814844
+        # tensor [out_ab] size: [1, 2, 512, 512], min: -41.829128, max: 52.045349, mean: 4.471401
 
         return out_ab
 

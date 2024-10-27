@@ -37,8 +37,6 @@ class Block(nn.Module):
         self.gamma = nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=False)
 
     def forward(self, x):
-        # x = torch_nn_arange(x)
-
         input = x
         x = self.dwconv(x)
         x = x.permute(0, 2, 3, 1) # (N, C, H, W) -> (N, H, W, C)

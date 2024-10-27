@@ -105,11 +105,6 @@ class MultiheadAttention(nn.Module):
             self.out_proj.bias,
         )
 
-        # query = torch_nn_arange3(query)
-        # key = torch_nn_arange3(key)
-        # value = torch_nn_arange3(value)
-        # todos.debug.output_var("attn_output -------", attn_output)
-
         return attn_output # [100, 1, 256]
 
     def extra_repr(self) -> str:
